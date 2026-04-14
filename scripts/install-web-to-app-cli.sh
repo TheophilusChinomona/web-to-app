@@ -3,6 +3,7 @@ set -euo pipefail
 
 DRY_RUN=0
 FORCE=0
+AUTO_INSTALL=1
 TARGET_DIR="${WEB_TO_APP_CLI_DIR:-$HOME/.web-to-app-cli}"
 REPO_URL="${WEB_TO_APP_CLI_REPO:-https://github.com/TheophilusChinomona/web-to-app.git}"
 BRANCH="${WEB_TO_APP_CLI_BRANCH:-expo-cross-platform}"
@@ -15,12 +16,13 @@ Usage:
   install-web-to-app-cli.sh [options]
 
 Options:
-  --dry-run              Print actions without executing
-  --force                Remove existing target dir first
-  --target-dir <path>    Install location (default: ~/.web-to-app-cli)
-  --repo <url>           Git repo URL
-  --branch <name>        Branch/tag/commit to checkout (default: expo-cross-platform)
-  -h, --help             Show this help
+  --dry-run                Print actions without executing
+  --force                  Remove existing target dir first
+  --no-auto-install        Fail on missing dependencies instead of installing
+  --target-dir <path>      Install location (default: ~/.web-to-app-cli)
+  --repo <url>             Git repo URL
+  --branch <name>          Branch/tag/commit to checkout (default: expo-cross-platform)
+  -h, --help               Show this help
 
 Examples:
   curl -fsSL <RAW_SCRIPT_URL> | bash
@@ -37,10 +39,81 @@ run() {
   fi
 }
 
+need_sudo() {
+  [[ "${EUID:-$(id -u)}" -ne 0 ]]
+}
+
+install_with_apt() {
+  local pkg="$1"
+  if need_sudo; then
+    run "sudo apt-get update"
+    run "sudo apt-get install -y $pkg"
+  else
+    run "apt-get update"
+    run "apt-get install -y $pkg"
+  fi
+}
+
+install_with_brew() {
+  local pkg="$1"
+  run "brew install $pkg"
+}
+
+auto_install_cmd() {
+  local cmd="$1"
+
+  if command -v "$cmd" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "$AUTO_INSTALL" != "1" ]]; then
+    echo "Missing dependency: $cmd"
+    return 1
+  fi
+
+  log "Missing dependency detected: $cmd"
+
+  if command -v apt-get >/dev/null 2>&1; then
+    case "$cmd" in
+      git) install_with_apt git ;;
+      node|npm)
+        install_with_apt curl ca-certificates gnupg
+        if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+          if need_sudo; then
+            run "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+            run "sudo apt-get install -y nodejs"
+          else
+            run "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
+            run "apt-get install -y nodejs"
+          fi
+        fi
+        ;;
+      *) echo "No apt installer mapping for: $cmd"; return 1 ;;
+    esac
+  elif command -v brew >/dev/null 2>&1; then
+    case "$cmd" in
+      git) install_with_brew git ;;
+      node|npm) install_with_brew node ;;
+      *) echo "No brew installer mapping for: $cmd"; return 1 ;;
+    esac
+  else
+    echo "No supported package manager found to auto-install '$cmd' (supports apt-get or brew)."
+    return 1
+  fi
+
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "Dependency install attempted, but '$cmd' is still missing."
+    return 1
+  fi
+
+  log "Dependency ready: $cmd"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --force) FORCE=1; shift ;;
+    --no-auto-install) AUTO_INSTALL=0; shift ;;
     --target-dir) TARGET_DIR="$2"; shift 2 ;;
     --repo) REPO_URL="$2"; shift 2 ;;
     --branch) BRANCH="$2"; shift 2 ;;
@@ -50,7 +123,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 for cmd in git node npm; do
-  command -v "$cmd" >/dev/null 2>&1 || { echo "Missing dependency: $cmd"; exit 1; }
+  auto_install_cmd "$cmd"
 done
 
 if [[ -d "$TARGET_DIR" ]]; then
