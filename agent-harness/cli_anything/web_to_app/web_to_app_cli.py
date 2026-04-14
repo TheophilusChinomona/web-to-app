@@ -232,6 +232,30 @@ def build_dry_run(ctx: CliContext, task: str):
     emit(ctx, ctx.backend.build_dry_run(task=task))
 
 
+@build.command("assemble")
+@click.option("--variant", default=None, help="Variant name, e.g. DevDebug or Release")
+@click.option("--flavor", default=None, help="Flavor name, e.g. dev")
+@click.option("--build-type", default="debug", show_default=True, help="Build type, e.g. debug/release")
+@click.option("--execute", is_flag=True, help="Actually run Gradle assemble task")
+@pass_context
+def build_assemble(ctx: CliContext, variant: Optional[str], flavor: Optional[str], build_type: str, execute: bool):
+    target = ctx.backend.resolve_variant_target(variant=variant, flavor=flavor, build_type=build_type)
+    emit(ctx, ctx.backend.build_execute_wrapper(task=target["resolved"]["task"], execute=execute))
+
+
+@build.command("bundle")
+@click.option("--variant", default=None, help="Variant name, e.g. DevRelease")
+@click.option("--flavor", default=None, help="Flavor name, e.g. dev")
+@click.option("--build-type", default="release", show_default=True, help="Build type, e.g. release")
+@click.option("--execute", is_flag=True, help="Actually run Gradle bundle task")
+@pass_context
+def build_bundle(ctx: CliContext, variant: Optional[str], flavor: Optional[str], build_type: str, execute: bool):
+    target = ctx.backend.resolve_variant_target(variant=variant, flavor=flavor, build_type=build_type)
+    assemble_task = target["resolved"]["task"]
+    bundle_task = assemble_task.replace("assemble", "bundle", 1)
+    emit(ctx, ctx.backend.build_execute_wrapper(task=bundle_task, execute=execute))
+
+
 @cli.group("extension")
 def extension_group():
     """Extension lifecycle tooling (safe by default)."""
@@ -292,3 +316,45 @@ def extension_plan(ctx: CliContext, action: str, extension_id: str, source: str 
             execute=execute,
         ),
     )
+
+
+@extension_group.command("apply")
+@click.option("--action", type=click.Choice(["install", "remove"]), required=True)
+@click.option("--extension-id", required=True)
+@click.option("--source", default=None, help="Path/URL for install source")
+@click.option("--execute", is_flag=True, help="Actually apply the lifecycle plan")
+@click.option("--confirm", default=None, help="Required token: <action>:<extension-id>")
+@click.option("--allow-destructive", is_flag=True, help="Required for remove execution")
+@pass_context
+def extension_apply(
+    ctx: CliContext,
+    action: str,
+    extension_id: str,
+    source: str | None,
+    execute: bool,
+    confirm: str | None,
+    allow_destructive: bool,
+):
+    emit(
+        ctx,
+        ctx.backend.apply_extension_plan(
+            action=action,
+            extension_id=extension_id,
+            source=source,
+            execute=execute,
+            confirm=confirm,
+            allow_destructive=allow_destructive,
+        ),
+    )
+
+
+@cli.group()
+def config():
+    """Config write/apply operations with rollback safety."""
+
+
+@config.command("apply-profile")
+@click.option("--execute", is_flag=True, help="Write profile config to disk")
+@pass_context
+def config_apply_profile(ctx: CliContext, execute: bool):
+    emit(ctx, ctx.backend.apply_profile_config_transactional(profile=ctx.state.snapshot(), execute=execute))

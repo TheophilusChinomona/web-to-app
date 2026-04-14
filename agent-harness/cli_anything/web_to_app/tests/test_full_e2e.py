@@ -74,6 +74,19 @@ def test_cli_json_extension_commands():
     plan_payload = json.loads(plan.stdout)
     assert plan_payload["mode"] == "simulation_only"
 
+    apply = _run(
+        "--json",
+        "extension",
+        "apply",
+        "--action",
+        "remove",
+        "--extension-id",
+        "e2e-ext",
+    )
+    assert apply.returncode == 0
+    apply_payload = json.loads(apply.stdout)
+    assert apply_payload["mode"] == "dry_run"
+
 
 def test_cli_state_set_and_show_json():
     result = _run("--json", "state", "set", "app_name", "Demo")
@@ -101,11 +114,34 @@ def test_cli_build_new_json_commands():
         ["build", "target", "--flavor", "dev", "--build-type", "release"],
         ["build", "assemble-simulate", "--build-type", "debug"],
         ["build", "signing-inspect"],
+        ["build", "assemble", "--build-type", "debug"],
+        ["build", "bundle", "--build-type", "release"],
+        ["config", "apply-profile"],
     ]:
         result = _run("--json", *command)
         assert result.returncode == 0
         payload = json.loads(result.stdout)
         assert isinstance(payload, dict)
+
+
+def test_cli_golden_build_target_resolution():
+    result = _run("--json", "build", "target", "--flavor", "dev", "--build-type", "release")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["resolved"]["variant"] == "DevRelease"
+    assert payload["resolved"]["task"] == "assembleDevRelease"
+
+
+def test_cli_failure_path_for_missing_gradle_wrapper():
+    result = _run("--json", "build", "dry-run", "--task", "assembleDebug")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    if "error" in payload:
+        assert payload["error"]["code"] in {"GRADLEW_MISSING", "GRADLEW_NOT_EXECUTABLE"}
+    else:
+        # Repository may have gradlew present and fail later due to env/dependencies.
+        assert isinstance(payload.get("returncode"), int)
 
 
 def test_cli_build_target_human_mode():

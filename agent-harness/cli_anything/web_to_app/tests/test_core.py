@@ -200,7 +200,8 @@ def test_build_check_and_dry_run_missing_gradlew(tmp_path):
 
     dry_run = backend.build_dry_run()
     assert dry_run["ok"] is False
-    assert "gradlew not found" in dry_run["error"]
+    assert dry_run["error"]["code"] == "GRADLEW_MISSING"
+    assert "gradlew not found" in dry_run["error"]["message"]
 
 
 def test_build_readiness_reports_missing_env_and_tools(tmp_path, monkeypatch):
@@ -225,7 +226,7 @@ def test_resolve_variant_target_and_simulate(tmp_path):
     sim = backend.assemble_simulation(flavor="prod", build_type="debug")
     assert sim["target"]["resolved"]["task"] == "assembleProdDebug"
     assert sim["simulation"]["ok"] is False
-    assert "gradlew not found" in sim["simulation"]["error"]
+    assert sim["simulation"]["error"]["code"] == "GRADLEW_MISSING"
 
 
 def test_signing_config_inspection(tmp_path):
@@ -266,3 +267,104 @@ def test_extension_discovery_metadata_validation_and_stub(tmp_path):
     plan = backend.simulate_extension_plan(action="remove", extension_id="demoext", mutate=True, execute=True)
     assert plan["ok"] is True
     assert plan["execution_performed"] is False
+
+
+def test_extension_apply_requires_execute_and_confirm(tmp_path):
+    backend = WebToAppBackend(_make_fixture_repo(tmp_path))
+    result = backend.apply_extension_plan(action="remove", extension_id="demoext", execute=False)
+    assert result["mode"] == "dry_run"
+
+    blocked = backend.apply_extension_plan(action="remove", extension_id="demoext", execute=True, confirm="bad")
+    assert blocked["ok"] is False
+    assert blocked["mode"] == "blocked"
+
+
+def test_transactional_profile_config_rolls_back_on_failure(tmp_path):
+    backend = WebToAppBackend(_make_fixture_repo(tmp_path))
+    dry = backend.apply_profile_config_transactional(profile={"app_name": "Demo"}, execute=False)
+    assert dry["mode"] == "dry_run"
+
+    ok = backend.apply_profile_config_transactional(profile={"app_name": "Demo"}, execute=True)
+    assert ok["ok"] is True
+
+    fail = backend.apply_profile_config_transactional(
+        profile={"app_name": "Broken"},
+        execute=True,
+        fail_after_write=True,
+    )
+    assert fail["ok"] is False
+    profile_file = tmp_path / ".cli-anything-web-to-app" / "session-profile.json"
+    content = profile_file.read_text(encoding="utf-8")
+    assert "Broken" not in content
+
+
+def test_build_execute_wrapper_blocks_release_without_keystore(tmp_path, monkeypatch):
+    backend = WebToAppBackend(_make_fixture_repo(tmp_path))
+    monkeypatch.setenv("ANDROID_SDK_ROOT", "/tmp/android-sdk")
+    blocked = backend.build_execute_wrapper(task="bundleRelease", execute=True)
+    assert blocked["ok"] is False
+    assert blocked["mode"] == "blocked"
+
+
+def test_manifest_malformed_returns_error_taxonomy(tmp_path):
+    repo = _make_fixture_repo(tmp_path)
+    manifest_path = repo / "app" / "src" / "main" / "AndroidManifest.xml"
+    manifest_path.write_text("<manifest><application></manifest>", encoding="utf-8")
+
+    backend = WebToAppBackend(repo)
+    manifest = backend.manifest_info()
+    assert manifest["exists"] is True
+    assert manifest["error"]["code"] == "MANIFEST_MALFORMED"
+    assert len(manifest["error"]["hints"]) >= 1
+
+
+def test_groovy_gradle_and_settings_are_parsed(tmp_path):
+    (tmp_path / "settings.gradle").write_text("rootProject.name = 'GroovyDemo'\ninclude ':app', ':feature:chat'\n", encoding="utf-8")
+    (tmp_path / "build.gradle").write_text("plugins { id 'com.android.application' version '8.4.0' apply false }\n", encoding="utf-8")
+    app_dir = tmp_path / "app"
+    app_dir.mkdir(parents=True, exist_ok=True)
+    (app_dir / "build.gradle").write_text(
+        """
+android {
+  compileSdkVersion 34
+  defaultConfig {
+    applicationId "com.example.groovy"
+    minSdkVersion 24
+    targetSdkVersion 34
+    versionCode 2
+    versionName "1.2.0"
+  }
+}
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    backend = WebToAppBackend(tmp_path)
+    modules = backend.list_modules()
+    gradle = backend.gradle_info()
+    assert modules["root_project_name"] == "GroovyDemo"
+    assert "app" in modules["modules"]
+    assert "feature:chat" in modules["modules"]
+    assert gradle["application_id"] == "com.example.groovy"
+    assert gradle["compile_sdk"] == 34
+    assert gradle["min_sdk"] == 24
+
+
+def test_build_dry_run_non_executable_wrapper(tmp_path):
+    repo = _make_fixture_repo(tmp_path)
+    gradlew = repo / "gradlew"
+    gradlew.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    gradlew.chmod(0o644)
+
+    backend = WebToAppBackend(repo)
+    dry_run = backend.build_dry_run()
+    assert dry_run["ok"] is False
+    assert dry_run["error"]["code"] == "GRADLEW_NOT_EXECUTABLE"
+
+
+def test_golden_android_summary_shape(tmp_path):
+    backend = WebToAppBackend(_make_fixture_repo(tmp_path))
+    payload = backend.android_resources_summary()
+    assert sorted(payload.keys()) == ["android", "manifest"]
+    assert payload["manifest"]["package"] == "com.example.demo"
+    assert payload["android"]["application_id"] == "com.example.demo"

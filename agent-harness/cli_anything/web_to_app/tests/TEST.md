@@ -11,7 +11,12 @@
   - Gradle metadata extraction (namespace, app id, SDK versions)
 - Build wrappers:
   - `build_check` readiness flags
-  - `build_dry_run` graceful behavior when wrapper is missing
+  - `build_dry_run` taxonomy behavior when wrapper is missing/non-executable
+- Reliability/failure-path hardening:
+  - malformed AndroidManifest handling (`MANIFEST_MALFORMED`)
+  - Groovy DSL parser resilience for settings/build files
+- Golden-output style checks:
+  - stable `android_summary` shape and critical values
 
 ## E2E coverage (`test_full_e2e.py`)
 
@@ -27,7 +32,16 @@
 - Safe build wrappers:
   - `build check`
   - `build dry-run`
+- Golden-output checks for critical command contracts:
+  - `build target --flavor dev --build-type release` resolves to `assembleDevRelease`
+- Failure-path checks:
+  - build dry-run returns structured error taxonomy when wrapper is unavailable
 - Invalid argument failure path (`state set` bad key)
+
+## CI
+
+- GitHub Actions workflow: `.github/workflows/agent-harness-tests.yml`
+- Trigger scope: push/PR changes under `projects/web-to-app/agent-harness/**`
 
 ## How to run
 
@@ -42,3 +56,5 @@ Optional quick checks:
 python -m cli_anything.web_to_app --json inspect gradle
 python -m cli_anything.web_to_app --json build dry-run
 ```
+
+If a consumer still expects the old `error: "..."` shape, update it to read `error.code/message/hints`.

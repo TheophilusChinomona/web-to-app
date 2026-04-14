@@ -5,7 +5,9 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -38,6 +40,19 @@ class WebToAppBackend:
             "unit_test_count": len(tests),
         }
 
+    def _error(self, code: str, message: str, hints: Optional[List[str]] = None, details: Optional[Dict] = None) -> Dict:
+        payload: Dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": code,
+                "message": message,
+                "hints": hints or [],
+            },
+        }
+        if details:
+            payload["error"]["details"] = details
+        return payload
+
     def project_tree(self, max_depth: int = 2) -> Dict:
         max_depth = max(1, min(max_depth, 8))
         rows: List[Dict[str, str | int]] = []
@@ -66,6 +81,9 @@ class WebToAppBackend:
 
     def list_modules(self) -> Dict:
         settings_path = self.source_root / "settings.gradle.kts"
+        settings_groovy = self.source_root / "settings.gradle"
+        if not settings_path.exists() and settings_groovy.exists():
+            settings_path = settings_groovy
         content = self._read_text_if_exists(settings_path)
         includes = re.findall(r'include\(([^\)]*)\)', content)
 
@@ -76,6 +94,11 @@ class WebToAppBackend:
 
         if not modules and content:
             modules = re.findall(r'include\("([^"]+)"\)', content)
+        if not modules and content:
+            # Groovy style: include ':app', ':feature:demo'
+            groovy_include_lines = re.findall(r"\binclude\s+([^\n]+)", content)
+            for line in groovy_include_lines:
+                modules.extend(re.findall(r"['\"]([^'\"]+)['\"]", line))
 
         normalized_modules = [m.lstrip(":") for m in modules]
         module_dirs = [m.replace(":", "/") for m in normalized_modules]
@@ -214,13 +237,27 @@ class WebToAppBackend:
             )
         except ET.ParseError as exc:
             data["parse_error"] = str(exc)
+            data["error"] = {
+                "code": "MANIFEST_MALFORMED",
+                "message": "AndroidManifest.xml is malformed XML",
+                "hints": [
+                    "Validate XML syntax (matching tags, quotes, and namespace attributes)",
+                    "Run: xmllint --noout app/src/main/AndroidManifest.xml",
+                ],
+            }
 
         return data
 
     def gradle_info(self) -> Dict:
         root_build = self.source_root / "build.gradle.kts"
+        if not root_build.exists() and (self.source_root / "build.gradle").exists():
+            root_build = self.source_root / "build.gradle"
         app_build = self.source_root / "app" / "build.gradle.kts"
+        if not app_build.exists() and (self.source_root / "app" / "build.gradle").exists():
+            app_build = self.source_root / "app" / "build.gradle"
         settings = self.source_root / "settings.gradle.kts"
+        if not settings.exists() and (self.source_root / "settings.gradle").exists():
+            settings = self.source_root / "settings.gradle"
 
         settings_text = self._read_text_if_exists(settings)
         root_build_text = self._read_text_if_exists(root_build)
@@ -239,6 +276,7 @@ class WebToAppBackend:
             "version_code": self._extract_kts_number(app_build_text, "versionCode"),
             "version_name": self._extract_kts_assignment(app_build_text, "versionName"),
             "plugin_versions": self._extract_plugins(root_build_text),
+            "warnings": self._gradle_warnings(app_build_text),
         }
 
     def build_variants(self) -> Dict:
@@ -586,6 +624,124 @@ class WebToAppBackend:
             "plan_steps": steps,
         }
 
+    def apply_extension_plan(
+        self,
+        action: str,
+        extension_id: str,
+        source: Optional[str] = None,
+        execute: bool = False,
+        confirm: Optional[str] = None,
+        allow_destructive: bool = False,
+    ) -> Dict:
+        plan = self.simulate_extension_plan(action=action, extension_id=extension_id, source=source)
+        if not plan.get("ok"):
+            return plan
+
+        ext_id = extension_id.strip()
+        normalized_action = action.lower().strip()
+        expected_confirm = f"{normalized_action}:{ext_id}"
+        target = self.source_root / "app" / "src" / "main" / "assets" / "extensions" / ext_id
+
+        if not execute:
+            return {
+                **plan,
+                "mode": "dry_run",
+                "execution_performed": False,
+                "next_step": f"Re-run with --execute --confirm {expected_confirm}",
+            }
+
+        if confirm != expected_confirm:
+            return {
+                **plan,
+                "ok": False,
+                "mode": "blocked",
+                "execution_performed": False,
+                "error": f"Confirmation token mismatch. Provide --confirm {expected_confirm}",
+            }
+
+        if normalized_action == "remove" and not allow_destructive:
+            return {
+                **plan,
+                "ok": False,
+                "mode": "blocked",
+                "execution_performed": False,
+                "error": "Removal is destructive. Re-run with --allow-destructive",
+            }
+
+        backup_dir = self.source_root / ".cli-anything-web-to-app" / "backups" / "extensions"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_dir / f"{ext_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+
+        try:
+            if normalized_action == "install":
+                if not source:
+                    return {**plan, "ok": False, "mode": "blocked", "error": "--source is required for install"}
+                src_path = Path(source)
+                if not src_path.is_absolute():
+                    src_path = (self.source_root / src_path).resolve()
+                if not src_path.exists():
+                    return {**plan, "ok": False, "mode": "blocked", "error": f"Source not found: {src_path}"}
+                if target.exists():
+                    return {
+                        **plan,
+                        "ok": False,
+                        "mode": "blocked",
+                        "error": f"Target already exists: {target.relative_to(self.source_root)}",
+                    }
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if src_path.is_dir():
+                    shutil.copytree(src_path, target)
+                else:
+                    with tempfile.TemporaryDirectory() as td:
+                        tmp = Path(td)
+                        shutil.unpack_archive(str(src_path), str(tmp))
+                        manifest_dir = tmp
+                        if not (tmp / "manifest.json").exists():
+                            candidates = [p.parent for p in tmp.glob("**/manifest.json")]
+                            if len(candidates) == 1:
+                                manifest_dir = candidates[0]
+                        shutil.copytree(manifest_dir, target)
+            else:
+                if not target.exists():
+                    return {**plan, "ok": False, "mode": "blocked", "error": "Extension does not exist"}
+                shutil.copytree(target, backup_path)
+                shutil.rmtree(target)
+
+            lock_update = self._update_extension_lockfile_transactional(execute=True)
+            if not lock_update.get("ok"):
+                raise RuntimeError(lock_update.get("error", "Failed to update extension lockfile"))
+
+            return {
+                **plan,
+                "ok": True,
+                "mode": "executed",
+                "execution_performed": True,
+                "target": str(target.relative_to(self.source_root)),
+                "backup_path": str(backup_path.relative_to(self.source_root)) if backup_path.exists() else None,
+                "lockfile": lock_update,
+            }
+        except Exception as exc:
+            if normalized_action == "install" and target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            if normalized_action == "remove" and backup_path.exists() and not target.exists():
+                shutil.copytree(backup_path, target)
+            return {
+                **plan,
+                "ok": False,
+                "mode": "rollback",
+                "execution_performed": False,
+                "error": str(exc),
+                "rollback": "attempted",
+            }
+
+    def apply_profile_config_transactional(self, profile: Dict[str, str], execute: bool = False, fail_after_write: bool = False) -> Dict:
+        target = self.source_root / ".cli-anything-web-to-app" / "session-profile.json"
+        payload = {
+            "profile": profile,
+            "updated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        return self._transactional_json_write(target=target, payload=payload, execute=execute, fail_after_write=fail_after_write)
+
     def build_plan(self, profile: Dict[str, str]) -> Dict:
         return {
             "profile": profile,
@@ -603,7 +759,8 @@ class WebToAppBackend:
 
     def build_readiness(self) -> Dict:
         gradlew = self.source_root / "gradlew"
-        app_build = self.source_root / "app" / "build.gradle.kts"
+        app_build_kts = self.source_root / "app" / "build.gradle.kts"
+        app_build_groovy = self.source_root / "app" / "build.gradle"
         manifest = self.source_root / "app" / "src" / "main" / "AndroidManifest.xml"
         gradle_wrapper_jar = self.source_root / "gradle" / "wrapper" / "gradle-wrapper.jar"
         gradle_wrapper_properties = self.source_root / "gradle" / "wrapper" / "gradle-wrapper.properties"
@@ -621,7 +778,7 @@ class WebToAppBackend:
             "gradlew_executable": gradlew.exists() and gradlew.stat().st_mode & 0o111 != 0,
             "gradle_wrapper_jar_exists": gradle_wrapper_jar.exists(),
             "gradle_wrapper_properties_exists": gradle_wrapper_properties.exists(),
-            "app_build_exists": app_build.exists(),
+            "app_build_exists": app_build_kts.exists() or app_build_groovy.exists(),
             "manifest_exists": manifest.exists(),
             "java_available": bool(java_bin),
             "android_sdk_available": bool(sdk_root),
@@ -630,13 +787,13 @@ class WebToAppBackend:
 
         blockers = []
         if not checks["gradlew_exists"]:
-            blockers.append("Missing ./gradlew")
+            blockers.append("Missing ./gradlew (run: gradle wrapper)")
         if not checks["app_build_exists"]:
-            blockers.append("Missing app/build.gradle.kts")
+            blockers.append("Missing app/build.gradle(.kts)")
         if not checks["java_available"]:
-            blockers.append("Java is not on PATH")
+            blockers.append("Java is not on PATH (install JDK 17+ and export JAVA_HOME)")
         if not checks["android_sdk_available"]:
-            blockers.append("ANDROID_SDK_ROOT or ANDROID_HOME is not set")
+            blockers.append("ANDROID_SDK_ROOT or ANDROID_HOME is not set (point to Android SDK path)")
 
         warnings = []
         if checks["gradlew_exists"] and not checks["gradlew_executable"]:
@@ -794,21 +951,75 @@ class WebToAppBackend:
     def build_dry_run(self, task: str = "assembleDebug") -> Dict:
         gradlew = self.source_root / "gradlew"
         if not gradlew.exists():
-            return {
-                "ok": False,
+            payload = self._error(
+                code="GRADLEW_MISSING",
+                message="gradlew not found",
+                hints=[
+                    "Generate wrapper with: gradle wrapper",
+                    "Commit gradlew and gradle/wrapper/* into the repository",
+                ],
+            )
+            payload.update({
                 "task": task,
                 "command": ["./gradlew", task, "--dry-run", "--console=plain"],
-                "error": "gradlew not found",
-            }
+            })
+            return payload
+
+        if gradlew.stat().st_mode & 0o111 == 0:
+            payload = self._error(
+                code="GRADLEW_NOT_EXECUTABLE",
+                message="gradlew is not executable",
+                hints=["Run: chmod +x ./gradlew"],
+            )
+            payload.update({
+                "task": task,
+                "command": ["./gradlew", task, "--dry-run", "--console=plain"],
+            })
+            return payload
 
         cmd = ["./gradlew", task, "--dry-run", "--console=plain"]
-        proc = subprocess.run(
-            cmd,
-            cwd=self.source_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=self.source_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired as exc:
+            payload = self._error(
+                code="GRADLE_DRY_RUN_TIMEOUT",
+                message="Gradle dry-run timed out",
+                hints=["Retry on a warm daemon", "Run with --stacktrace for diagnostics"],
+                details={"timeout_seconds": 120},
+            )
+            payload.update({
+                "task": task,
+                "command": cmd,
+                "stdout": (exc.stdout or "")[-12000:],
+                "stderr": (exc.stderr or "")[-12000:],
+            })
+            return payload
+        except OSError as exc:
+            payload = self._error(
+                code="GRADLE_INVOKE_FAILED",
+                message="Failed to execute Gradle wrapper",
+                hints=["Verify shell permissions and repository mount", "Run ./gradlew --version manually"],
+                details={"os_error": str(exc)},
+            )
+            payload.update({"task": task, "command": cmd})
+            return payload
+
+        failure_hints: List[str] = []
+        stderr_text = (proc.stderr or "") + "\n" + (proc.stdout or "")
+        if "SDK location not found" in stderr_text or "ANDROID_HOME" in stderr_text or "ANDROID_SDK_ROOT" in stderr_text:
+            failure_hints.append("Set ANDROID_SDK_ROOT (or ANDROID_HOME) to your Android SDK directory")
+        if "JAVA_HOME" in stderr_text or "No Java runtime" in stderr_text:
+            failure_hints.append("Install JDK 17+ and set JAVA_HOME")
+        if "Could not determine the dependencies" in stderr_text:
+            failure_hints.append("Run ./gradlew --refresh-dependencies and check repository/network access")
+
         return {
             "ok": proc.returncode == 0,
             "task": task,
@@ -816,18 +1027,166 @@ class WebToAppBackend:
             "returncode": proc.returncode,
             "stdout": proc.stdout[-12000:],
             "stderr": proc.stderr[-12000:],
+            "hints": failure_hints,
         }
+
+    def build_execution_readiness(self, task: str) -> Dict:
+        base = self.build_readiness()
+        blockers = list(base.get("blockers", []))
+        remediation: List[str] = []
+
+        java_home = os.environ.get("JAVA_HOME")
+        if java_home and not Path(java_home).exists():
+            blockers.append("JAVA_HOME points to a non-existent path")
+            remediation.append("Set JAVA_HOME to a valid JDK root path")
+
+        is_release_like = "release" in task.lower() or task.lower().startswith("bundle")
+        if is_release_like:
+            signing = self.signing_config_inspect()
+            release_cfg = signing.get("signing_config_properties", {}).get("release")
+            if not release_cfg:
+                blockers.append("Release signingConfig not found")
+                remediation.append("Define signingConfigs.release in app/build.gradle(.kts)")
+            else:
+                if not release_cfg.get("has_store_file"):
+                    blockers.append("signingConfigs.release.storeFile not configured")
+                    remediation.append("Set storeFile = file(\"...\") for signingConfigs.release")
+                app_build = self.source_root / "app" / "build.gradle.kts"
+                text = self._read_text_if_exists(app_build)
+                signing_block = self._extract_block_content(text, "signingConfigs") or ""
+                release_block = self._extract_block_content(signing_block, "release") or ""
+                m = re.search(r"storeFile\s*=\s*file\(\s*[\"']([^\"']+)[\"']\s*\)", release_block)
+                if m:
+                    key_path = (self.source_root / "app" / m.group(1)).resolve()
+                    if not key_path.exists():
+                        blockers.append(f"Keystore file not found: {key_path}")
+                        remediation.append("Create keystore or update storeFile path in signingConfigs.release")
+
+        if not os.environ.get("ANDROID_SDK_ROOT") and not os.environ.get("ANDROID_HOME"):
+            remediation.append("Export ANDROID_SDK_ROOT (or ANDROID_HOME) to your Android SDK directory")
+        if not shutil.which("java"):
+            remediation.append("Install JDK 17+ and ensure java is on PATH")
+        if not (self.source_root / "gradlew").exists():
+            remediation.append("Generate/recover ./gradlew and gradle/wrapper/*")
+
+        return {
+            "ready": len(blockers) == 0,
+            "task": task,
+            "blockers": blockers,
+            "warnings": base.get("warnings", []),
+            "checks": base.get("checks", {}),
+            "remediation": sorted(set(remediation)),
+        }
+
+    def build_execute_wrapper(self, task: str, execute: bool = False) -> Dict:
+        readiness = self.build_execution_readiness(task=task)
+        command = ["./gradlew", task, "--console=plain"]
+
+        if not execute:
+            dry_run = self.build_dry_run(task=task)
+            return {
+                "ok": dry_run.get("ok", False),
+                "mode": "dry_run",
+                "task": task,
+                "command": command,
+                "readiness": readiness,
+                "dry_run": dry_run,
+            }
+
+        if not readiness.get("ready", False):
+            return {
+                "ok": False,
+                "mode": "blocked",
+                "task": task,
+                "command": command,
+                "readiness": readiness,
+                "error": "Build execution blocked by readiness checks",
+                "remediation": readiness.get("remediation", []),
+            }
+
+        proc = subprocess.run(command, cwd=self.source_root, capture_output=True, text=True, check=False)
+        return {
+            "ok": proc.returncode == 0,
+            "mode": "executed",
+            "task": task,
+            "command": command,
+            "readiness": readiness,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-12000:],
+            "stderr": proc.stderr[-12000:],
+        }
+
+    def _update_extension_lockfile_transactional(self, execute: bool = False) -> Dict:
+        extension_ids = [e["id"] for e in self.discover_installed_extensions().get("extensions", [])]
+        payload = {
+            "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "extensions": sorted(extension_ids),
+            "count": len(extension_ids),
+        }
+        target = self.source_root / "app" / "src" / "main" / "assets" / "extensions" / "extensions.lock.json"
+        return self._transactional_json_write(target=target, payload=payload, execute=execute)
+
+    def _transactional_json_write(self, target: Path, payload: Dict, execute: bool, fail_after_write: bool = False) -> Dict:
+        before_content = self._read_text_if_exists(target)
+        backup_path: Optional[Path] = None
+
+        if not execute:
+            return {
+                "ok": True,
+                "mode": "dry_run",
+                "target": str(target.relative_to(self.source_root)),
+                "existing": target.exists(),
+                "would_write": True,
+                "preview": payload,
+            }
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            backup_path = target.with_suffix(target.suffix + f".bak.{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}")
+            shutil.copy2(target, backup_path)
+
+        try:
+            temp_path = target.with_suffix(target.suffix + ".tmp")
+            temp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            os.replace(temp_path, target)
+            if fail_after_write:
+                raise RuntimeError("Simulated post-write failure")
+            return {
+                "ok": True,
+                "mode": "executed",
+                "target": str(target.relative_to(self.source_root)),
+                "backup": str(backup_path.relative_to(self.source_root)) if backup_path else None,
+            }
+        except Exception as exc:
+            if backup_path and backup_path.exists():
+                shutil.copy2(backup_path, target)
+            elif target.exists() and not before_content:
+                target.unlink(missing_ok=True)
+            return {
+                "ok": False,
+                "mode": "rollback",
+                "target": str(target.relative_to(self.source_root)),
+                "backup": str(backup_path.relative_to(self.source_root)) if backup_path and backup_path.exists() else None,
+                "error": str(exc),
+            }
 
     def _extract_kts_assignment(self, text: str, key: str) -> Optional[str]:
         if not text:
             return None
-        m = re.search(rf"{re.escape(key)}\s*=\s*\"([^\"]+)\"", text)
-        return m.group(1) if m else None
+        m = re.search(rf"{re.escape(key)}\s*=\s*[\"']([^\"']+)[\"']", text)
+        if m:
+            return m.group(1)
+        # Groovy style: key "value"
+        m2 = re.search(rf"{re.escape(key)}\s+[\"']([^\"']+)[\"']", text)
+        return m2.group(1) if m2 else None
 
     def _extract_kts_number(self, text: str, key: str) -> Optional[int]:
         if not text:
             return None
         m = re.search(rf"{re.escape(key)}\s*=\s*(\d+)", text)
+        if not m:
+            # Groovy style: minSdkVersion 24 / compileSdkVersion 34
+            m = re.search(rf"{re.escape(key)}(?:Version)?\s+(\d+)", text)
         if not m:
             return None
         return int(m.group(1))
@@ -838,7 +1197,17 @@ class WebToAppBackend:
         rows = []
         for plugin_id, version in re.findall(r'id\("([^"]+)"\)\s+version\s+"([^"]+)"', text):
             rows.append({"id": plugin_id, "version": version})
+        for plugin_id, version in re.findall(r"id\s+['\"]([^'\"]+)['\"]\s+version\s+['\"]([^'\"]+)['\"]", text):
+            rows.append({"id": plugin_id, "version": version})
         return rows
+
+    def _gradle_warnings(self, app_build_text: str) -> List[str]:
+        warnings: List[str] = []
+        if app_build_text and "android" not in app_build_text:
+            warnings.append("android{} block not found in app Gradle file")
+        if app_build_text and self._extract_kts_assignment(app_build_text, "applicationId") is None:
+            warnings.append("applicationId not found")
+        return warnings
 
     def _extract_named_blocks(self, text: str, block_name: str) -> List[str]:
         if not text:
