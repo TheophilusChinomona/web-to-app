@@ -646,3 +646,22 @@ Uninstall:
 ```bash
 bash ~/.web-to-app-cli/scripts/uninstall-web-to-app-cli.sh
 ```
+
+
+## Windows (PowerShell) installer
+
+```powershell
+irm https://raw.githubusercontent.com/TheophilusChinomona/web-to-app/expo-cross-platform/scripts/install-web-to-app-cli.ps1 | iex
+```
+
+Dry run:
+
+```powershell
+irm https://raw.githubusercontent.com/TheophilusChinomona/web-to-app/expo-cross-platform/scripts/install-web-to-app-cli.ps1 | iex; install-web-to-app-cli.ps1 -DryRun
+```
+
+Uninstall:
+
+```powershell
+pwsh -File "$HOME/.web-to-app-cli/scripts/uninstall-web-to-app-cli.ps1"
+```
