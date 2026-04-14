@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import json
 import re
+import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -355,6 +358,234 @@ class WebToAppBackend:
             )
         return items
 
+    def discover_installed_extensions(self) -> Dict:
+        base = self.source_root / "app" / "src" / "main" / "assets" / "extensions"
+        if not base.exists():
+            return {
+                "extensions_root": str(base.relative_to(self.source_root)),
+                "exists": False,
+                "count": 0,
+                "extensions": [],
+            }
+
+        rows = []
+        for ext_dir in sorted([x for x in base.iterdir() if x.is_dir()]):
+            meta = self._load_extension_manifest(ext_dir)
+            rows.append(
+                {
+                    "id": ext_dir.name,
+                    "path": str(ext_dir.relative_to(self.source_root)),
+                    "manifest_exists": meta.get("manifest_exists", False),
+                    "name": meta.get("name"),
+                    "version": meta.get("version"),
+                    "manifest_version": meta.get("manifest_version"),
+                    "content_script_count": meta.get("content_script_count", 0),
+                }
+            )
+
+        return {
+            "extensions_root": str(base.relative_to(self.source_root)),
+            "exists": True,
+            "count": len(rows),
+            "extensions": rows,
+        }
+
+    def extension_metadata(self, extension_id: str) -> Dict:
+        ext_dir = self.source_root / "app" / "src" / "main" / "assets" / "extensions" / extension_id
+        if not ext_dir.exists() or not ext_dir.is_dir():
+            return {
+                "ok": False,
+                "extension_id": extension_id,
+                "error": "extension not found",
+            }
+
+        meta = self._load_extension_manifest(ext_dir)
+        files = [
+            str(p.relative_to(ext_dir))
+            for p in sorted(ext_dir.glob("**/*"))
+            if p.is_file()
+        ]
+
+        return {
+            "ok": True,
+            "extension_id": extension_id,
+            "path": str(ext_dir.relative_to(self.source_root)),
+            "metadata": meta,
+            "file_count": len(files),
+            "js_file_count": len([p for p in files if p.endswith(".js")]),
+            "css_file_count": len([p for p in files if p.endswith(".css")]),
+            "sample_files": files[:20],
+        }
+
+    def validate_extension_compatibility(self) -> Dict:
+        parser_path = self.source_root / "app" / "src" / "main" / "java" / "com" / "webtoapp" / "core" / "extension" / "ChromeExtensionParser.kt"
+        parser_text = self._read_text_if_exists(parser_path)
+
+        supported_permissions = sorted(
+            set(re.findall(r'"([A-Za-z][A-Za-z0-9]+)"\s+to\s+ModulePermission\.', parser_text))
+        )
+        unsupported_permissions = sorted(
+            set(re.findall(r'"([A-Za-z][A-Za-z0-9]+)"', self._extract_set_block(parser_text, "UNSUPPORTED_PERMISSIONS")))
+        )
+
+        extension_results = []
+        for ext in self.discover_installed_extensions().get("extensions", []):
+            ext_id = ext["id"]
+            detail = self.extension_metadata(ext_id)
+            meta = detail.get("metadata", {}) if detail.get("ok") else {}
+
+            permissions = meta.get("permissions", []) or []
+            host_permissions = meta.get("host_permissions", []) or []
+            optional_permissions = meta.get("optional_permissions", []) or []
+            api_permissions = [
+                p for p in permissions + host_permissions + optional_permissions
+                if isinstance(p, str) and "://" not in p and p != "<all_urls>"
+            ]
+            unsupported_used = sorted([p for p in api_permissions if p in unsupported_permissions])
+            unknown_permissions = sorted([p for p in api_permissions if p not in supported_permissions and p not in unsupported_permissions])
+
+            missing_content_files = []
+            for cs in meta.get("content_scripts", []) or []:
+                for key in ["js", "css"]:
+                    for raw_path in cs.get(key, []) or []:
+                        norm = self._normalize_manifest_path(raw_path)
+                        if not (self.source_root / "app" / "src" / "main" / "assets" / "extensions" / ext_id / norm).exists():
+                            missing_content_files.append(norm)
+
+            extension_results.append(
+                {
+                    "extension_id": ext_id,
+                    "name": meta.get("name"),
+                    "manifest_version": meta.get("manifest_version"),
+                    "supported": len(unsupported_used) == 0,
+                    "unsupported_permissions_used": unsupported_used,
+                    "unknown_permissions": unknown_permissions,
+                    "missing_content_files": sorted(set(missing_content_files)),
+                    "warnings": meta.get("warnings", []),
+                }
+            )
+
+        return {
+            "parser_contract": {
+                "manifest_versions_supported": [2, 3],
+                "supported_permission_keys": supported_permissions,
+                "unsupported_permission_keys": unsupported_permissions,
+                "source": str(parser_path.relative_to(self.source_root)) if parser_path.exists() else None,
+            },
+            "extensions_checked": len(extension_results),
+            "extensions": extension_results,
+        }
+
+    def generate_extension_stub(self, extension_id: str, manifest_version: int = 3, write: bool = False, force: bool = False) -> Dict:
+        ext_id = re.sub(r"[^a-zA-Z0-9_-]+", "-", extension_id.strip()).strip("-") or "new-extension"
+        base = self.source_root / "app" / "src" / "main" / "assets" / "extensions" / ext_id
+
+        manifest: Dict[str, object] = {
+            "manifest_version": int(manifest_version),
+            "name": ext_id,
+            "version": "0.1.0",
+            "description": "TODO: describe extension behavior",
+            "permissions": ["storage"],
+            "host_permissions": ["<all_urls>"],
+            "content_scripts": [
+                {
+                    "matches": ["<all_urls>"],
+                    "js": ["content.js"],
+                    "css": ["style.css"],
+                    "run_at": "document_idle",
+                }
+            ],
+            "icons": {"16": "assets/icon-16.png", "48": "assets/icon-48.png", "128": "assets/icon-128.png"},
+        }
+        if int(manifest_version) >= 3:
+            manifest["background"] = {"service_worker": "background/index.js", "type": "module"}
+        else:
+            manifest["background"] = {"scripts": ["background/index.js"], "persistent": False}
+
+        files = {
+            "manifest.json": json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+            "content.js": "// TODO: add content script\n",
+            "style.css": "/* TODO: add extension styles */\n",
+            "background/index.js": "// TODO: add background logic\n",
+            "assets/.keep": "",
+        }
+
+        writes = []
+        errors = []
+        if write:
+            for rel, content in files.items():
+                path = base / rel
+                if path.exists() and not force:
+                    errors.append(f"exists: {rel} (use --force to overwrite)")
+                    continue
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                writes.append(str(path.relative_to(self.source_root)))
+
+        return {
+            "extension_id": ext_id,
+            "manifest_version": int(manifest_version),
+            "write_requested": write,
+            "wrote_files": writes,
+            "write_errors": errors,
+            "stub": files,
+            "target_root": str(base.relative_to(self.source_root)),
+        }
+
+    def simulate_extension_plan(
+        self,
+        action: str,
+        extension_id: str,
+        source: Optional[str] = None,
+        mutate: bool = False,
+        execute: bool = False,
+    ) -> Dict:
+        normalized_action = action.lower().strip()
+        ext_id = extension_id.strip()
+        target = self.source_root / "app" / "src" / "main" / "assets" / "extensions" / ext_id
+
+        if normalized_action not in {"install", "remove"}:
+            return {"ok": False, "error": "action must be 'install' or 'remove'"}
+
+        if normalized_action == "install":
+            preconditions = [{
+                "check": "target_not_exists",
+                "ok": not target.exists(),
+                "path": str(target.relative_to(self.source_root)),
+            }]
+            steps = [
+                "Validate extension source archive/folder",
+                f"Extract files into {target.relative_to(self.source_root)}",
+                "Parse manifest.json and content_scripts",
+                "Run extension compatibility validation",
+            ]
+        else:
+            preconditions = [{
+                "check": "target_exists",
+                "ok": target.exists(),
+                "path": str(target.relative_to(self.source_root)),
+            }]
+            steps = [
+                "Resolve extension module references",
+                "Archive extension folder for rollback",
+                f"Remove {target.relative_to(self.source_root)}",
+                "Re-run extension discovery/validation",
+            ]
+
+        return {
+            "ok": True,
+            "mode": "simulation_only",
+            "action": normalized_action,
+            "extension_id": ext_id,
+            "source": source,
+            "mutate_flag": mutate,
+            "execute_flag": execute,
+            "execution_performed": False,
+            "execution_blocked_reason": "This harness only simulates extension lifecycle actions. No destructive action is executed.",
+            "preconditions": preconditions,
+            "plan_steps": steps,
+        }
+
     def build_plan(self, profile: Dict[str, str]) -> Dict:
         return {
             "profile": profile,
@@ -368,17 +599,196 @@ class WebToAppBackend:
         }
 
     def build_check(self) -> Dict:
+        return self.build_readiness()
+
+    def build_readiness(self) -> Dict:
         gradlew = self.source_root / "gradlew"
         app_build = self.source_root / "app" / "build.gradle.kts"
         manifest = self.source_root / "app" / "src" / "main" / "AndroidManifest.xml"
+        gradle_wrapper_jar = self.source_root / "gradle" / "wrapper" / "gradle-wrapper.jar"
+        gradle_wrapper_properties = self.source_root / "gradle" / "wrapper" / "gradle-wrapper.properties"
 
-        return {
-            "source_root": str(self.source_root),
+        java_bin = shutil.which("java")
+        adb_bin = shutil.which("adb")
+        sdk_root = (
+            os.environ.get("ANDROID_SDK_ROOT")
+            or os.environ.get("ANDROID_HOME")
+            or ""
+        )
+
+        checks = {
             "gradlew_exists": gradlew.exists(),
             "gradlew_executable": gradlew.exists() and gradlew.stat().st_mode & 0o111 != 0,
+            "gradle_wrapper_jar_exists": gradle_wrapper_jar.exists(),
+            "gradle_wrapper_properties_exists": gradle_wrapper_properties.exists(),
             "app_build_exists": app_build.exists(),
             "manifest_exists": manifest.exists(),
-            "ready_for_gradle_invocation": gradlew.exists() and app_build.exists(),
+            "java_available": bool(java_bin),
+            "android_sdk_available": bool(sdk_root),
+            "adb_available": bool(adb_bin),
+        }
+
+        blockers = []
+        if not checks["gradlew_exists"]:
+            blockers.append("Missing ./gradlew")
+        if not checks["app_build_exists"]:
+            blockers.append("Missing app/build.gradle.kts")
+        if not checks["java_available"]:
+            blockers.append("Java is not on PATH")
+        if not checks["android_sdk_available"]:
+            blockers.append("ANDROID_SDK_ROOT or ANDROID_HOME is not set")
+
+        warnings = []
+        if checks["gradlew_exists"] and not checks["gradlew_executable"]:
+            warnings.append("./gradlew is not executable")
+        if not checks["gradle_wrapper_jar_exists"]:
+            warnings.append("gradle/wrapper/gradle-wrapper.jar missing")
+        if not checks["gradle_wrapper_properties_exists"]:
+            warnings.append("gradle/wrapper/gradle-wrapper.properties missing")
+        if not checks["manifest_exists"]:
+            warnings.append("AndroidManifest.xml missing")
+        if not checks["adb_available"]:
+            warnings.append("adb is not on PATH (device/emulator checks unavailable)")
+
+        ready = len(blockers) == 0
+        return {
+            "source_root": str(self.source_root),
+            "gradlew_exists": checks["gradlew_exists"],
+            "gradlew_executable": checks["gradlew_executable"],
+            "app_build_exists": checks["app_build_exists"],
+            "manifest_exists": checks["manifest_exists"],
+            "ready_for_gradle_invocation": checks["gradlew_exists"] and checks["app_build_exists"],
+            "checks": checks,
+            "tools": {
+                "java": java_bin,
+                "adb": adb_bin,
+            },
+            "env": {
+                "ANDROID_SDK_ROOT": os.environ.get("ANDROID_SDK_ROOT"),
+                "ANDROID_HOME": os.environ.get("ANDROID_HOME"),
+                "JAVA_HOME": os.environ.get("JAVA_HOME"),
+            },
+            "ready_for_build": ready,
+            "blockers": blockers,
+            "warnings": warnings,
+        }
+
+    def resolve_variant_target(
+        self,
+        variant: Optional[str] = None,
+        flavor: Optional[str] = None,
+        build_type: str = "debug",
+    ) -> Dict:
+        variants = self.build_variants()
+        known_build_types = variants.get("build_types", [])
+        known_flavors = variants.get("product_flavors", [])
+
+        if variant:
+            normalized_variant = variant[:1].upper() + variant[1:]
+        elif flavor:
+            normalized_variant = f"{self._capitalize(flavor)}{self._capitalize(build_type)}"
+        else:
+            normalized_variant = self._capitalize(build_type)
+
+        task = f"assemble{normalized_variant}"
+        known_variant_names = variants.get("variant_names", [])
+        variant_known = not known_variant_names or normalized_variant in known_variant_names
+
+        warnings = []
+        if build_type and known_build_types and build_type not in known_build_types:
+            warnings.append(f"Unknown build type '{build_type}'")
+        if flavor and known_flavors and flavor not in known_flavors:
+            warnings.append(f"Unknown flavor '{flavor}'")
+        if not variant_known:
+            warnings.append(f"Variant '{normalized_variant}' not in discovered variant list")
+
+        return {
+            "requested": {
+                "variant": variant,
+                "flavor": flavor,
+                "build_type": build_type,
+            },
+            "resolved": {
+                "variant": normalized_variant,
+                "task": task,
+            },
+            "known": {
+                "build_types": known_build_types,
+                "product_flavors": known_flavors,
+                "variant_names": known_variant_names,
+            },
+            "warnings": warnings,
+        }
+
+    def assemble_simulation(
+        self,
+        variant: Optional[str] = None,
+        flavor: Optional[str] = None,
+        build_type: str = "debug",
+    ) -> Dict:
+        target = self.resolve_variant_target(variant=variant, flavor=flavor, build_type=build_type)
+        task = target["resolved"]["task"]
+        dry_run = self.build_dry_run(task=task)
+        return {
+            "target": target,
+            "simulation": dry_run,
+        }
+
+    def signing_config_inspect(self) -> Dict:
+        app_build = self.source_root / "app" / "build.gradle.kts"
+        text = self._read_text_if_exists(app_build)
+        if not text:
+            return {
+                "app_build_file": str(app_build.relative_to(self.source_root)) if app_build.exists() else None,
+                "exists": app_build.exists(),
+                "signing_configs": [],
+                "build_type_signing": {},
+                "warnings": ["Cannot inspect signing config without app/build.gradle.kts"],
+            }
+
+        signing_block = self._extract_block_content(text, "signingConfigs") or ""
+        signing_names = re.findall(r"\bcreate\(\s*[\"']([^\"']+)[\"']\s*\)", signing_block)
+        if not signing_names:
+            signing_names = re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\{", signing_block)
+        signing_names = sorted(set(signing_names))
+
+        property_flags = {}
+        for name in signing_names:
+            created_pattern = re.search(
+                rf"create\(\s*[\"']{re.escape(name)}[\"']\s*\)\s*\{{",
+                signing_block,
+            )
+            cfg_block = ""
+            if created_pattern:
+                cfg_block = self._extract_brace_content_at(signing_block, created_pattern.end() - 1) or ""
+            else:
+                cfg_block = self._extract_block_content(signing_block, name) or ""
+            property_flags[name] = {
+                "has_store_file": bool(re.search(r"\bstoreFile\b", cfg_block)),
+                "has_store_password": bool(re.search(r"\bstorePassword\b", cfg_block)),
+                "has_key_alias": bool(re.search(r"\bkeyAlias\b", cfg_block)),
+                "has_key_password": bool(re.search(r"\bkeyPassword\b", cfg_block)),
+            }
+
+        build_types_block = self._extract_block_content(text, "buildTypes") or ""
+        build_type_signing = {}
+        for bt in self._extract_named_blocks(text, "buildTypes"):
+            bt_block = self._extract_block_content(build_types_block, bt) or ""
+            m = re.search(r"\bsigningConfig\s*=\s*signingConfigs\.([A-Za-z0-9_]+)", bt_block)
+            build_type_signing[bt] = m.group(1) if m else None
+
+        warnings = []
+        if not signing_names:
+            warnings.append("No explicit signingConfigs block discovered")
+
+        return {
+            "app_build_file": str(app_build.relative_to(self.source_root)) if app_build.exists() else None,
+            "exists": app_build.exists(),
+            "signing_configs": signing_names,
+            "signing_config_properties": property_flags,
+            "build_type_signing": build_type_signing,
+            "read_only": True,
+            "warnings": warnings,
         }
 
     def build_dry_run(self, task: str = "assembleDebug") -> Dict:
@@ -458,7 +868,10 @@ class WebToAppBackend:
         start_match = re.search(rf"\b{re.escape(block_name)}\s*\{{", text)
         if not start_match:
             return None
-        start = start_match.end() - 1
+        return self._extract_brace_content_at(text, start_match.end() - 1)
+
+    def _extract_brace_content_at(self, text: str, brace_idx: int) -> Optional[str]:
+        start = brace_idx
         depth = 0
         i = start
         while i < len(text):
@@ -471,3 +884,50 @@ class WebToAppBackend:
                     return text[start + 1 : i]
             i += 1
         return None
+
+    def _extract_set_block(self, text: str, set_name: str) -> str:
+        if not text:
+            return ""
+        match = re.search(rf"\b{re.escape(set_name)}\s*=\s*setOf\((.*?)\)", text, flags=re.DOTALL)
+        return match.group(1) if match else ""
+
+    def _load_extension_manifest(self, extension_dir: Path) -> Dict:
+        manifest_path = extension_dir / "manifest.json"
+        if not manifest_path.exists():
+            return {
+                "manifest_exists": False,
+                "warnings": ["manifest.json missing"],
+            }
+
+        try:
+            data = json.loads(self._read_text_if_exists(manifest_path))
+        except json.JSONDecodeError as exc:
+            return {
+                "manifest_exists": True,
+                "parse_error": str(exc),
+                "warnings": ["manifest.json is invalid JSON"],
+            }
+
+        content_scripts = data.get("content_scripts") if isinstance(data.get("content_scripts"), list) else []
+        warnings = []
+        for idx, cs in enumerate(content_scripts):
+            if not isinstance(cs, dict):
+                warnings.append(f"content_scripts[{idx}] is not an object")
+
+        return {
+            "manifest_exists": True,
+            "name": data.get("name"),
+            "version": data.get("version"),
+            "description": data.get("description"),
+            "manifest_version": data.get("manifest_version"),
+            "permissions": data.get("permissions", []),
+            "host_permissions": data.get("host_permissions", []),
+            "optional_permissions": data.get("optional_permissions", []),
+            "background": data.get("background", {}),
+            "content_scripts": content_scripts,
+            "content_script_count": len(content_scripts),
+            "warnings": warnings,
+        }
+
+    def _normalize_manifest_path(self, value: str) -> str:
+        return value.strip().lstrip("./")

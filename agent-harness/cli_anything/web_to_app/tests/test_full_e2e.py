@@ -43,6 +43,38 @@ def test_cli_json_inspect_commands():
         assert isinstance(payload, dict)
 
 
+def test_cli_json_extension_commands():
+    discover = _run("--json", "extension", "discover")
+    assert discover.returncode == 0
+    discover_payload = json.loads(discover.stdout)
+    assert "extensions" in discover_payload
+
+    validate = _run("--json", "extension", "validate")
+    assert validate.returncode == 0
+    validate_payload = json.loads(validate.stdout)
+    assert "parser_contract" in validate_payload
+
+    stub = _run("--json", "extension", "stub", "e2e-ext")
+    assert stub.returncode == 0
+    stub_payload = json.loads(stub.stdout)
+    assert stub_payload["extension_id"] == "e2e-ext"
+
+    plan = _run(
+        "--json",
+        "extension",
+        "plan",
+        "--action",
+        "install",
+        "--extension-id",
+        "e2e-ext",
+        "--source",
+        "./demo.zip",
+    )
+    assert plan.returncode == 0
+    plan_payload = json.loads(plan.stdout)
+    assert plan_payload["mode"] == "simulation_only"
+
+
 def test_cli_state_set_and_show_json():
     result = _run("--json", "state", "set", "app_name", "Demo")
     assert result.returncode == 0
@@ -61,6 +93,25 @@ def test_cli_build_check_and_dry_run_json():
     dry_run_payload = json.loads(dry_run.stdout)
     assert "ok" in dry_run_payload
     assert dry_run_payload.get("task") == "assembleDebug"
+
+
+def test_cli_build_new_json_commands():
+    for command in [
+        ["build", "readiness"],
+        ["build", "target", "--flavor", "dev", "--build-type", "release"],
+        ["build", "assemble-simulate", "--build-type", "debug"],
+        ["build", "signing-inspect"],
+    ]:
+        result = _run("--json", *command)
+        assert result.returncode == 0
+        payload = json.loads(result.stdout)
+        assert isinstance(payload, dict)
+
+
+def test_cli_build_target_human_mode():
+    result = _run("build", "target", "--build-type", "debug")
+    assert result.returncode == 0
+    assert "assemble" in result.stdout
 
 
 def test_invalid_argument_non_zero_exit():

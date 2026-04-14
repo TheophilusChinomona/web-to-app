@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shlex
 from pathlib import Path
+from typing import Optional
 
 import click
 
@@ -194,8 +195,100 @@ def build_check(ctx: CliContext):
     emit(ctx, ctx.backend.build_check())
 
 
+@build.command("readiness")
+@pass_context
+def build_readiness(ctx: CliContext):
+    emit(ctx, ctx.backend.build_readiness())
+
+
+@build.command("target")
+@click.option("--variant", default=None, help="Variant name, e.g. DevDebug or Release")
+@click.option("--flavor", default=None, help="Flavor name, e.g. dev")
+@click.option("--build-type", default="debug", show_default=True, help="Build type, e.g. debug/release")
+@pass_context
+def build_target(ctx: CliContext, variant: Optional[str], flavor: Optional[str], build_type: str):
+    emit(ctx, ctx.backend.resolve_variant_target(variant=variant, flavor=flavor, build_type=build_type))
+
+
+@build.command("assemble-simulate")
+@click.option("--variant", default=None, help="Variant name, e.g. DevDebug or Release")
+@click.option("--flavor", default=None, help="Flavor name, e.g. dev")
+@click.option("--build-type", default="debug", show_default=True, help="Build type, e.g. debug/release")
+@pass_context
+def build_assemble_simulate(ctx: CliContext, variant: Optional[str], flavor: Optional[str], build_type: str):
+    emit(ctx, ctx.backend.assemble_simulation(variant=variant, flavor=flavor, build_type=build_type))
+
+
+@build.command("signing-inspect")
+@pass_context
+def build_signing_inspect(ctx: CliContext):
+    emit(ctx, ctx.backend.signing_config_inspect())
+
+
 @build.command("dry-run")
 @click.option("--task", default="assembleDebug", show_default=True)
 @pass_context
 def build_dry_run(ctx: CliContext, task: str):
     emit(ctx, ctx.backend.build_dry_run(task=task))
+
+
+@cli.group("extension")
+def extension_group():
+    """Extension lifecycle tooling (safe by default)."""
+
+
+@extension_group.command("discover")
+@pass_context
+def extension_discover(ctx: CliContext):
+    emit(ctx, ctx.backend.discover_installed_extensions())
+
+
+@extension_group.command("show")
+@click.argument("extension_id")
+@pass_context
+def extension_show(ctx: CliContext, extension_id: str):
+    emit(ctx, ctx.backend.extension_metadata(extension_id))
+
+
+@extension_group.command("validate")
+@pass_context
+def extension_validate(ctx: CliContext):
+    emit(ctx, ctx.backend.validate_extension_compatibility())
+
+
+@extension_group.command("stub")
+@click.argument("extension_id")
+@click.option("--manifest-version", default=3, type=click.Choice(["2", "3"]), show_default=True)
+@click.option("--write", is_flag=True, help="Write generated stub files to assets/extensions/<id>")
+@click.option("--force", is_flag=True, help="Overwrite existing files when used with --write")
+@pass_context
+def extension_stub(ctx: CliContext, extension_id: str, manifest_version: str, write: bool, force: bool):
+    emit(
+        ctx,
+        ctx.backend.generate_extension_stub(
+            extension_id=extension_id,
+            manifest_version=int(manifest_version),
+            write=write,
+            force=force,
+        ),
+    )
+
+
+@extension_group.command("plan")
+@click.option("--action", type=click.Choice(["install", "remove"]), required=True)
+@click.option("--extension-id", required=True)
+@click.option("--source", default=None, help="Path/URL for install source")
+@click.option("--mutate", is_flag=True, help="Explicitly request mutating mode (still simulated)")
+@click.option("--execute", is_flag=True, help="Explicitly request execution (blocked; simulation only)")
+@pass_context
+def extension_plan(ctx: CliContext, action: str, extension_id: str, source: str | None, mutate: bool, execute: bool):
+    emit(
+        ctx,
+        ctx.backend.simulate_extension_plan(
+            action=action,
+            extension_id=extension_id,
+            source=source,
+            mutate=mutate,
+            execute=execute,
+        ),
+    )
