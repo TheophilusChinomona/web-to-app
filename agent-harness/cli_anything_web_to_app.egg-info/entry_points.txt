@@ -1,0 +1,2 @@
+[console_scripts]
+cli-anything-web-to-app = cli_anything.web_to_app.__main__:main

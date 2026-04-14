@@ -1,0 +1,14 @@
+setup.py
+cli_anything/web_to_app/__init__.py
+cli_anything/web_to_app/__main__.py
+cli_anything/web_to_app/web_to_app_cli.py
+cli_anything/web_to_app/core/state.py
+cli_anything/web_to_app/tests/test_core.py
+cli_anything/web_to_app/tests/test_full_e2e.py
+cli_anything/web_to_app/utils/web_to_app_backend.py
+cli_anything_web_to_app.egg-info/PKG-INFO
+cli_anything_web_to_app.egg-info/SOURCES.txt
+cli_anything_web_to_app.egg-info/dependency_links.txt
+cli_anything_web_to_app.egg-info/entry_points.txt
+cli_anything_web_to_app.egg-info/requires.txt
+cli_anything_web_to_app.egg-info/top_level.txt
