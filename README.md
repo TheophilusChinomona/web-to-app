@@ -626,3 +626,23 @@ Developed independently by shiaho. Feel free to reach out!
 **Open Source · Free Forever · Star ⭐ to Support**
 
 </div>
+
+## One-line installer (curl)
+
+Use the installer script to clone, install deps, and run tests:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TheophilusChinomona/web-to-app/expo-cross-platform/scripts/install-web-to-app-cli.sh | bash
+```
+
+Dry run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TheophilusChinomona/web-to-app/expo-cross-platform/scripts/install-web-to-app-cli.sh | bash -s -- --dry-run
+```
+
+Uninstall:
+
+```bash
+bash ~/.web-to-app-cli/scripts/uninstall-web-to-app-cli.sh
+```
