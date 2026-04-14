@@ -71,3 +71,15 @@ eas build --platform ios --profile production
 - `src/screens/WebViewScreen.tsx`: WebView wrapper + guards
 - `src/utils/navigationGuard.ts`: internal-host navigation policy
 - `src/utils/linking.ts`: external link safety checks
+
+
+## Tests
+
+```bash
+npm run test
+```
+
+Current coverage targets core wrapper safety logic:
+- navigation guard host/scheme enforcement
+- safe external link handling
+- env-based URL/host resolution
