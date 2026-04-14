@@ -44,7 +44,9 @@ def run_repl(ctx: CliContext):
         if line in {"exit", "quit"}:
             break
         if line == "help":
-            click.echo("Examples: inspect summary | inspect modules | inspect manifest | build dry-run")
+            click.echo(
+                "Examples: inspect summary | inspect feature-map | inspect variants | inspect android-summary | build dry-run"
+            )
             continue
         args = shlex.split(line)
         try:
@@ -118,6 +120,30 @@ def inspect_samples(ctx: CliContext):
 @pass_context
 def inspect_extensions(ctx: CliContext):
     emit(ctx, {"extensions": ctx.backend.list_extensions()})
+
+
+@inspect.command("feature-map")
+@pass_context
+def inspect_feature_map(ctx: CliContext):
+    emit(ctx, ctx.backend.feature_module_map())
+
+
+@inspect.command("variants")
+@pass_context
+def inspect_variants(ctx: CliContext):
+    emit(ctx, ctx.backend.build_variants())
+
+
+@inspect.command("android-summary")
+@pass_context
+def inspect_android_summary(ctx: CliContext):
+    emit(ctx, ctx.backend.android_resources_summary())
+
+
+@inspect.command("dependencies")
+@pass_context
+def inspect_dependencies(ctx: CliContext):
+    emit(ctx, ctx.backend.dependency_summary())
 
 
 @cli.group()

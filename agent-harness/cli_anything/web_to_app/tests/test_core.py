@@ -8,6 +8,8 @@ MANIFEST = """<manifest xmlns:android=\"http://schemas.android.com/apk/res/andro
     <uses-permission android:name=\"android.permission.INTERNET\" />
     <application android:name=\".DemoApp\" android:label=\"@string/app_name\">
         <activity android:name=\".MainActivity\" android:exported=\"true\" />
+        <service android:name=\".SyncService\" android:exported=\"false\" />
+        <receiver android:name=\".BootReceiver\" android:exported=\"false\" />
     </application>
 </manifest>
 """
@@ -17,6 +19,26 @@ APP_BUILD = """
 android {
     namespace = "com.example.demo"
     compileSdk = 34
+    flavorDimensions += listOf("env")
+
+    buildTypes {
+        debug {
+            isMinifyEnabled = false
+        }
+        release {
+            isMinifyEnabled = true
+        }
+    }
+
+    productFlavors {
+        create("dev") {
+            dimension = "env"
+        }
+        create("prod") {
+            dimension = "env"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.example.demo"
         minSdk = 24
@@ -24,6 +46,11 @@ android {
         versionCode = 7
         versionName = "0.7.0"
     }
+}
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.13.1")
+    testImplementation("junit:junit:4.13.2")
 }
 """
 
@@ -79,12 +106,37 @@ def test_backend_modules_packages_manifest_and_gradle(tmp_path):
     manifest = backend.manifest_info()
     assert manifest["package"] == "com.example.demo"
     assert manifest["activity_count"] == 1
+    assert manifest["service_count"] == 1
+    assert manifest["receiver_count"] == 1
     assert "android.permission.INTERNET" in manifest["uses_permissions"]
 
     gradle = backend.gradle_info()
     assert gradle["android_namespace"] == "com.example.demo"
     assert gradle["application_id"] == "com.example.demo"
     assert gradle["compile_sdk"] == 34
+
+
+def test_backend_feature_map_variants_android_summary_and_dependencies(tmp_path):
+    backend = WebToAppBackend(_make_fixture_repo(tmp_path))
+
+    feature_map = backend.feature_module_map()
+    assert feature_map["root_project_name"] == "DemoProject"
+    assert any(m["name"] == "feature:demo" for m in feature_map["feature_modules"])
+
+    variants = backend.build_variants()
+    assert variants["build_types"] == ["debug", "release"]
+    assert variants["product_flavors"] == ["dev", "prod"]
+    assert "DevDebug" in variants["variant_names"]
+    assert "ProdRelease" in variants["variant_names"]
+
+    android_summary = backend.android_resources_summary()
+    assert android_summary["manifest"]["package"] == "com.example.demo"
+    assert android_summary["android"]["application_id"] == "com.example.demo"
+    assert android_summary["android"]["min_sdk"] == 24
+
+    deps = backend.dependency_summary()
+    assert deps["dependency_count"] >= 2
+    assert deps["by_configuration"]["implementation"] >= 1
 
 
 def test_build_check_and_dry_run_missing_gradlew(tmp_path):
@@ -97,3 +149,10 @@ def test_build_check_and_dry_run_missing_gradlew(tmp_path):
     dry_run = backend.build_dry_run()
     assert dry_run["ok"] is False
     assert "gradlew not found" in dry_run["error"]
+
+
+def test_build_variants_includes_implicit_debug_type(tmp_path):
+    backend = WebToAppBackend(_make_fixture_repo(tmp_path))
+    variants = backend.build_variants()
+    assert "debug" in variants["build_types"]
+    assert any(name.endswith("Debug") for name in variants["variant_names"])

@@ -29,8 +29,12 @@ def test_cli_json_inspect_summary():
 def test_cli_json_inspect_commands():
     for command in [
         ["inspect", "modules"],
+        ["inspect", "feature-map"],
         ["inspect", "manifest"],
+        ["inspect", "variants"],
+        ["inspect", "android-summary"],
         ["inspect", "gradle"],
+        ["inspect", "dependencies"],
         ["inspect", "tree", "--max-depth", "1"],
     ]:
         result = _run("--json", *command)
