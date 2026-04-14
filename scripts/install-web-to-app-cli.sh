@@ -39,6 +39,16 @@ run() {
   fi
 }
 
+resolve_node_cmd() {
+  if command -v node >/dev/null 2>&1; then
+    echo "node"
+  elif command -v nodejs >/dev/null 2>&1; then
+    echo "nodejs"
+  else
+    echo ""
+  fi
+}
+
 need_sudo() {
   [[ "${EUID:-$(id -u)}" -ne 0 ]]
 }
@@ -101,7 +111,17 @@ auto_install_cmd() {
     return 1
   fi
 
-  if ! command -v "$cmd" >/dev/null 2>&1; then
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log "Dry-run: assuming dependency would be installed: $cmd"
+    return 0
+  fi
+
+  if [[ "$cmd" == "node" ]]; then
+    if ! command -v node >/dev/null 2>&1 && ! command -v nodejs >/dev/null 2>&1; then
+      echo "Dependency install attempted, but neither 'node' nor 'nodejs' is available."
+      return 1
+    fi
+  elif ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Dependency install attempted, but '$cmd' is still missing."
     return 1
   fi
@@ -125,6 +145,12 @@ done
 for cmd in git node npm; do
   auto_install_cmd "$cmd"
 done
+
+NODE_CMD="$(resolve_node_cmd)"
+if [[ -z "$NODE_CMD" ]]; then
+  echo "Node runtime not found after dependency setup."
+  exit 1
+fi
 
 if [[ -d "$TARGET_DIR" ]]; then
   if [[ "$FORCE" == "1" ]]; then
@@ -161,6 +187,9 @@ Next steps:
 Optional:
   npm run android
   npm run ios
+
+Detected node runtime command:
+  $NODE_CMD
 
 Uninstall:
   bash "$TARGET_DIR/scripts/uninstall-web-to-app-cli.sh" --target-dir "$TARGET_DIR"
