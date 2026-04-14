@@ -148,8 +148,12 @@ done
 
 NODE_CMD="$(resolve_node_cmd)"
 if [[ -z "$NODE_CMD" ]]; then
-  echo "Node runtime not found after dependency setup."
-  exit 1
+  if [[ "$DRY_RUN" == "1" ]]; then
+    NODE_CMD="node (dry-run assumed)"
+  else
+    echo "Node runtime not found after dependency setup."
+    exit 1
+  fi
 fi
 
 if [[ -d "$TARGET_DIR" ]]; then
