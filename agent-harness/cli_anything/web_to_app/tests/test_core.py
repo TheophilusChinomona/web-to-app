@@ -2,6 +2,7 @@ from pathlib import Path
 
 from cli_anything.web_to_app.core.state import SessionState
 from cli_anything.web_to_app.utils.web_to_app_backend import WebToAppBackend
+from cli_anything.web_to_app.tests.snapshot import assert_json_snapshot
 
 
 MANIFEST = """<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" package=\"com.example.demo\">
@@ -362,9 +363,33 @@ def test_build_dry_run_non_executable_wrapper(tmp_path):
     assert dry_run["error"]["code"] == "GRADLEW_NOT_EXECUTABLE"
 
 
-def test_golden_android_summary_shape(tmp_path):
+def test_golden_android_summary_shape(tmp_path, update_goldens):
     backend = WebToAppBackend(_make_fixture_repo(tmp_path))
     payload = backend.android_resources_summary()
     assert sorted(payload.keys()) == ["android", "manifest"]
     assert payload["manifest"]["package"] == "com.example.demo"
     assert payload["android"]["application_id"] == "com.example.demo"
+    assert_json_snapshot("backend_android_summary", payload, update=update_goldens)
+
+
+def test_golden_variant_target_resolution_snapshot(tmp_path, update_goldens):
+    backend = WebToAppBackend(_make_fixture_repo(tmp_path))
+    payload = backend.resolve_variant_target(flavor="dev", build_type="release")
+    assert payload["resolved"]["variant"] == "DevRelease"
+    assert_json_snapshot("backend_variant_target_dev_release", payload, update=update_goldens)
+
+
+def test_extension_metadata_missing_uses_error_taxonomy(tmp_path):
+    backend = WebToAppBackend(_make_fixture_repo(tmp_path))
+    payload = backend.extension_metadata("does-not-exist")
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "EXTENSION_NOT_FOUND"
+
+
+def test_build_execute_blocked_uses_error_taxonomy(tmp_path, monkeypatch):
+    backend = WebToAppBackend(_make_fixture_repo(tmp_path))
+    monkeypatch.delenv("ANDROID_SDK_ROOT", raising=False)
+    monkeypatch.delenv("ANDROID_HOME", raising=False)
+    payload = backend.build_execute_wrapper(task="assembleDebug", execute=True)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "BUILD_READINESS_BLOCKED"

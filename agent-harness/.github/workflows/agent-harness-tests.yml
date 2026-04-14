@@ -1,0 +1,51 @@
+name: agent-harness-tests
+
+on:
+  push:
+    paths:
+      - "projects/web-to-app/agent-harness/**"
+      - ".github/workflows/agent-harness-tests.yml"
+  pull_request:
+    paths:
+      - "projects/web-to-app/agent-harness/**"
+      - ".github/workflows/agent-harness-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        include:
+          - python-version: "3.12"
+            with-java: true
+          - python-version: "3.11"
+            with-java: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Optional Java setup
+        if: matrix.with-java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install harness
+        working-directory: projects/web-to-app/agent-harness
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run tests
+        working-directory: projects/web-to-app/agent-harness
+        run: pytest -q

@@ -13,6 +13,7 @@ pip install -e .
 
 ```bash
 cli-anything-web-to-app inspect summary
+cli-anything-web-to-app --source-root /path/to/web-to-app inspect summary
 cli-anything-web-to-app inspect tree --max-depth 2
 cli-anything-web-to-app inspect modules
 cli-anything-web-to-app inspect feature-map
@@ -49,6 +50,7 @@ JSON output:
 
 ```bash
 cli-anything-web-to-app --json inspect gradle
+cli-anything-web-to-app --json --source-root /path/to/web-to-app build readiness
 ```
 
 REPL mode (default when no subcommand):
@@ -120,6 +122,7 @@ cli-anything-web-to-app
   - `GRADLE_INVOKE_FAILED`: wrapper could not be started.
   - `MANIFEST_MALFORMED`: manifest XML parse failure.
 - Build failure responses include actionable remediation hints.
+- Extension/config/build execution failure paths now return structured `error.code/message/hints` consistently.
 - Gradle/settings parsing now supports both Kotlin DSL (`*.kts`) and Groovy DSL (`*.gradle`).
 
 ## Migration notes
@@ -129,6 +132,8 @@ cli-anything-web-to-app
   - `error.message`
   - `error.hints[]`
 - Existing success payload fields remain unchanged.
+- Repository path can now be overridden globally via `--source-root` across all command groups.
+- Golden snapshots are file-based under `tests/golden/*.json`; update with `pytest --update-goldens` when intentional contract changes are made.
 
 ## Operational notes
 

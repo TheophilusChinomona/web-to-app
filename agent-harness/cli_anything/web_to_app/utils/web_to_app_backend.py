@@ -53,6 +53,11 @@ class WebToAppBackend:
             payload["error"]["details"] = details
         return payload
 
+    def _result_error(self, code: str, message: str, **extra: object) -> Dict:
+        payload = self._error(code=code, message=message, hints=extra.pop("hints", None), details=extra.pop("details", None))
+        payload.update(extra)
+        return payload
+
     def project_tree(self, max_depth: int = 2) -> Dict:
         max_depth = max(1, min(max_depth, 8))
         rows: List[Dict[str, str | int]] = []
@@ -431,11 +436,12 @@ class WebToAppBackend:
     def extension_metadata(self, extension_id: str) -> Dict:
         ext_dir = self.source_root / "app" / "src" / "main" / "assets" / "extensions" / extension_id
         if not ext_dir.exists() or not ext_dir.is_dir():
-            return {
-                "ok": False,
-                "extension_id": extension_id,
-                "error": "extension not found",
-            }
+            return self._result_error(
+                code="EXTENSION_NOT_FOUND",
+                message="extension not found",
+                extension_id=extension_id,
+                hints=["Run: extension discover", "Verify extension ID under app/src/main/assets/extensions"],
+            )
 
         meta = self._load_extension_manifest(ext_dir)
         files = [
@@ -583,7 +589,11 @@ class WebToAppBackend:
         target = self.source_root / "app" / "src" / "main" / "assets" / "extensions" / ext_id
 
         if normalized_action not in {"install", "remove"}:
-            return {"ok": False, "error": "action must be 'install' or 'remove'"}
+            return self._result_error(
+                code="INVALID_ACTION",
+                message="action must be 'install' or 'remove'",
+                action=action,
+            )
 
         if normalized_action == "install":
             preconditions = [{
@@ -651,22 +661,19 @@ class WebToAppBackend:
             }
 
         if confirm != expected_confirm:
-            return {
-                **plan,
-                "ok": False,
-                "mode": "blocked",
-                "execution_performed": False,
-                "error": f"Confirmation token mismatch. Provide --confirm {expected_confirm}",
-            }
+            payload = self._result_error(
+                code="CONFIRMATION_TOKEN_MISMATCH",
+                message=f"Confirmation token mismatch. Provide --confirm {expected_confirm}",
+                hints=[f"Re-run with: --confirm {expected_confirm}"],
+            )
+            return {**plan, **payload, "mode": "blocked", "execution_performed": False}
 
         if normalized_action == "remove" and not allow_destructive:
-            return {
-                **plan,
-                "ok": False,
-                "mode": "blocked",
-                "execution_performed": False,
-                "error": "Removal is destructive. Re-run with --allow-destructive",
-            }
+            payload = self._result_error(
+                code="DESTRUCTIVE_CONFIRMATION_REQUIRED",
+                message="Removal is destructive. Re-run with --allow-destructive",
+            )
+            return {**plan, **payload, "mode": "blocked", "execution_performed": False}
 
         backup_dir = self.source_root / ".cli-anything-web-to-app" / "backups" / "extensions"
         backup_dir.mkdir(parents=True, exist_ok=True)
@@ -675,19 +682,20 @@ class WebToAppBackend:
         try:
             if normalized_action == "install":
                 if not source:
-                    return {**plan, "ok": False, "mode": "blocked", "error": "--source is required for install"}
+                    payload = self._result_error(code="SOURCE_REQUIRED", message="--source is required for install")
+                    return {**plan, **payload, "mode": "blocked"}
                 src_path = Path(source)
                 if not src_path.is_absolute():
                     src_path = (self.source_root / src_path).resolve()
                 if not src_path.exists():
-                    return {**plan, "ok": False, "mode": "blocked", "error": f"Source not found: {src_path}"}
+                    payload = self._result_error(code="SOURCE_NOT_FOUND", message=f"Source not found: {src_path}")
+                    return {**plan, **payload, "mode": "blocked"}
                 if target.exists():
-                    return {
-                        **plan,
-                        "ok": False,
-                        "mode": "blocked",
-                        "error": f"Target already exists: {target.relative_to(self.source_root)}",
-                    }
+                    payload = self._result_error(
+                        code="TARGET_ALREADY_EXISTS",
+                        message=f"Target already exists: {target.relative_to(self.source_root)}",
+                    )
+                    return {**plan, **payload, "mode": "blocked"}
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if src_path.is_dir():
                     shutil.copytree(src_path, target)
@@ -703,13 +711,16 @@ class WebToAppBackend:
                         shutil.copytree(manifest_dir, target)
             else:
                 if not target.exists():
-                    return {**plan, "ok": False, "mode": "blocked", "error": "Extension does not exist"}
+                    payload = self._result_error(code="EXTENSION_NOT_FOUND", message="Extension does not exist")
+                    return {**plan, **payload, "mode": "blocked"}
                 shutil.copytree(target, backup_path)
                 shutil.rmtree(target)
 
             lock_update = self._update_extension_lockfile_transactional(execute=True)
             if not lock_update.get("ok"):
-                raise RuntimeError(lock_update.get("error", "Failed to update extension lockfile"))
+                lock_error = lock_update.get("error", {})
+                lock_message = lock_error.get("message") if isinstance(lock_error, dict) else None
+                raise RuntimeError(lock_message or "Failed to update extension lockfile")
 
             return {
                 **plan,
@@ -727,10 +738,9 @@ class WebToAppBackend:
                 shutil.copytree(backup_path, target)
             return {
                 **plan,
-                "ok": False,
+                **self._result_error(code="EXTENSION_APPLY_FAILED", message=str(exc)),
                 "mode": "rollback",
                 "execution_performed": False,
-                "error": str(exc),
                 "rollback": "attempted",
             }
 
@@ -1100,7 +1110,11 @@ class WebToAppBackend:
                 "task": task,
                 "command": command,
                 "readiness": readiness,
-                "error": "Build execution blocked by readiness checks",
+                "error": {
+                    "code": "BUILD_READINESS_BLOCKED",
+                    "message": "Build execution blocked by readiness checks",
+                    "hints": readiness.get("remediation", []),
+                },
                 "remediation": readiness.get("remediation", []),
             }
 
@@ -1163,11 +1177,10 @@ class WebToAppBackend:
             elif target.exists() and not before_content:
                 target.unlink(missing_ok=True)
             return {
-                "ok": False,
+                **self._result_error(code="TRANSACTION_WRITE_FAILED", message=str(exc)),
                 "mode": "rollback",
                 "target": str(target.relative_to(self.source_root)),
                 "backup": str(backup_path.relative_to(self.source_root)) if backup_path and backup_path.exists() else None,
-                "error": str(exc),
             }
 
     def _extract_kts_assignment(self, text: str, key: str) -> Optional[str]:

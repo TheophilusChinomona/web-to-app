@@ -1,0 +1,25 @@
+{
+  "known": {
+    "build_types": [
+      "debug",
+      "release"
+    ],
+    "product_flavors": [],
+    "variant_names": [
+      "Debug",
+      "Release"
+    ]
+  },
+  "requested": {
+    "build_type": "release",
+    "flavor": "dev",
+    "variant": null
+  },
+  "resolved": {
+    "task": "assembleDevRelease",
+    "variant": "DevRelease"
+  },
+  "warnings": [
+    "Variant 'DevRelease' not in discovered variant list"
+  ]
+}

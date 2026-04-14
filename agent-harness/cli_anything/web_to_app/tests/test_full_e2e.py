@@ -1,14 +1,19 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
+
+from cli_anything.web_to_app.tests.snapshot import assert_json_snapshot
+from cli_anything.web_to_app.tests.test_core import _make_fixture_repo
 
 
-def _run(*args):
+def _run(*args, cwd: Path | None = None):
     return subprocess.run(
         [sys.executable, "-m", "cli_anything.web_to_app", *args],
         capture_output=True,
         text=True,
         check=False,
+        cwd=cwd,
     )
 
 
@@ -124,12 +129,22 @@ def test_cli_build_new_json_commands():
         assert isinstance(payload, dict)
 
 
-def test_cli_golden_build_target_resolution():
+def test_cli_golden_build_target_resolution(update_goldens):
     result = _run("--json", "build", "target", "--flavor", "dev", "--build-type", "release")
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["resolved"]["variant"] == "DevRelease"
     assert payload["resolved"]["task"] == "assembleDevRelease"
+    assert_json_snapshot("cli_build_target_dev_release", payload, update=update_goldens)
+
+
+def test_cli_source_root_override_json(tmp_path):
+    source_root = _make_fixture_repo(tmp_path)
+    result = _run("--json", "--source-root", str(source_root), "inspect", "summary", cwd=source_root)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["project"] == source_root.name
+    assert payload["exists"] is True
 
 
 def test_cli_failure_path_for_missing_gradle_wrapper():

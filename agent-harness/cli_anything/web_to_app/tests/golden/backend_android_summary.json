@@ -1,0 +1,36 @@
+{
+  "android": {
+    "application_id": "com.example.demo",
+    "min_sdk": 24,
+    "namespace": "com.example.demo",
+    "target_sdk": 34,
+    "version_code": 7,
+    "version_name": "0.7.0"
+  },
+  "manifest": {
+    "activities": [
+      {
+        "exported": "true",
+        "name": ".MainActivity"
+      }
+    ],
+    "exists": true,
+    "package": "com.example.demo",
+    "path": "app/src/main/AndroidManifest.xml",
+    "permissions": [
+      "android.permission.INTERNET"
+    ],
+    "receivers": [
+      {
+        "exported": "false",
+        "name": ".BootReceiver"
+      }
+    ],
+    "services": [
+      {
+        "exported": "false",
+        "name": ".SyncService"
+      }
+    ]
+  }
+}

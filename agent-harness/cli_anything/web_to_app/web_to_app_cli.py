@@ -60,11 +60,20 @@ def run_repl(ctx: CliContext):
 
 @click.group(invoke_without_command=True)
 @click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON")
+@click.option(
+    "--source-root",
+    type=click.Path(path_type=Path, file_okay=False, dir_okay=True, resolve_path=True),
+    default=None,
+    help="Override repository source root (defaults to parent repo path)",
+)
 @click.pass_context
-def cli(click_ctx: click.Context, json_output: bool):
+def cli(click_ctx: click.Context, json_output: bool, source_root: Optional[Path]):
     """CLI-Anything harness for web-to-app."""
     ctx = click_ctx.ensure_object(CliContext)
     ctx.json_output = json_output
+    if source_root is not None:
+        ctx.source_root = source_root
+        ctx.backend = WebToAppBackend(ctx.source_root)
     if click_ctx.invoked_subcommand is None:
         run_repl(ctx)
 

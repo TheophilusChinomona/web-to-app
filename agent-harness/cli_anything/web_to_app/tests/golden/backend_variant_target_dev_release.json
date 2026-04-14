@@ -1,0 +1,28 @@
+{
+  "known": {
+    "build_types": [
+      "debug",
+      "release"
+    ],
+    "product_flavors": [
+      "dev",
+      "prod"
+    ],
+    "variant_names": [
+      "DevDebug",
+      "DevRelease",
+      "ProdDebug",
+      "ProdRelease"
+    ]
+  },
+  "requested": {
+    "build_type": "release",
+    "flavor": "dev",
+    "variant": null
+  },
+  "resolved": {
+    "task": "assembleDevRelease",
+    "variant": "DevRelease"
+  },
+  "warnings": []
+}
