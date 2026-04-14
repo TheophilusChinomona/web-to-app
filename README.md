@@ -657,7 +657,8 @@ irm https://raw.githubusercontent.com/TheophilusChinomona/web-to-app/expo-cross-
 Dry run:
 
 ```powershell
-irm https://raw.githubusercontent.com/TheophilusChinomona/web-to-app/expo-cross-platform/scripts/install-web-to-app-cli.ps1 | iex; install-web-to-app-cli.ps1 -DryRun
+iwr https://raw.githubusercontent.com/TheophilusChinomona/web-to-app/expo-cross-platform/scripts/install-web-to-app-cli.ps1 -OutFile install-web-to-app-cli.ps1
+pwsh -File .\install-web-to-app-cli.ps1 -DryRun
 ```
 
 Uninstall:
