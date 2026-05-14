@@ -1,0 +1,42 @@
+{
+  "dependencies": {
+    "expo-asset": "^55.0.17",
+    "expo-document-picker": "^55.0.13",
+    "expo-file-system": "^55.0.20",
+    "expo-haptics": "^55.0.14",
+    "expo-image-picker": "^55.0.20",
+    "expo-router": "^55.0.14",
+    "expo-secure-store": "^55.0.14",
+    "expo-splash-screen": "^55.0.21",
+    "expo-status-bar": "^55.0.6",
+    "react-native-gesture-handler": "^2.31.2",
+    "react-native-paper": "^5.15.2",
+    "react-native-reanimated": "^4.3.1",
+    "react-native-safe-area-context": "^5.7.0",
+    "react-native-screens": "^4.25.0",
+    "react-native-webview": "^13.16.1",
+    "uuid": "^10.0.0",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.13"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@testing-library/jest-native": "^5.4.3",
+    "@testing-library/react-native": "^13.3.3",
+    "@types/node": "^25.7.0",
+    "@types/uuid": "^10.0.0",
+    "jest": "^30.4.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "test": "jest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug"
+  }
+}
