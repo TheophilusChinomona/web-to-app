@@ -1,5 +1,6 @@
 package com.webtoapp.di
 
+import com.webtoapp.core.expo.ExpoProjectGenerator
 import com.webtoapp.core.activation.ActivationManager
 import com.webtoapp.core.adblock.AdBlocker
 import com.webtoapp.core.announcement.AnnouncementManager
@@ -73,6 +74,7 @@ val managerModule = module {
     single { AppHealthMonitor.getInstance(androidContext(), get()) }
     single { WebsiteScreenshotService.getInstance(androidContext()) }
     single { BatchImportService(androidContext(), get()) }
+    single { ExpoProjectGenerator(androidContext()) }
     // Auth
     single { TokenManager.getInstance(androidContext()) }
     single { AuthApiClient(get()) }

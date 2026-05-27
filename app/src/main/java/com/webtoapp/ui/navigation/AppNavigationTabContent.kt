@@ -92,6 +92,7 @@ internal fun HomeTabContent(
         onOpenAiHtmlCoding = { navController.navigate(Routes.AI_HTML_CODING) },
         onOpenExtensionModules = { navController.navigate(Routes.EXTENSION_MODULES) },
         onOpenLinuxEnvironment = { navController.navigate(Routes.LINUX_ENVIRONMENT) },
+        onExpoExport = { webApp -> navController.navigate(Routes.expoExport(webApp.id)) },
     )
 }
 
