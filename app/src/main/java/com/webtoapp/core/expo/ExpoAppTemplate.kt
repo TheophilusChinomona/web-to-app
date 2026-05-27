@@ -5,154 +5,159 @@ import com.webtoapp.data.model.MultiWebConfig
 object ExpoAppTemplate {
 
     fun webView(url: String): String = """
-import React from 'react';
-import { View, StatusBar, StyleSheet } from 'react-native';
-import { WebView } from 'react-native-webview';
+import React, { useEffect } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+
+const TARGET_URL = '${url.replace("'", "\\'")}';
 
 export default function App() {
+  useEffect(() => {
+    WebBrowser.openBrowserAsync(TARGET_URL);
+  }, []);
+
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <WebView
-        source={{ uri: '${url.replace("'", "\\'")}' }}
-        style={styles.webview}
-        javaScriptEnabled
-        domStorageEnabled
-        startInLoadingState
-      />
+      <ActivityIndicator size="large" color="#6200ee" />
+      <Text style={styles.label}>Opening...</Text>
+      <TouchableOpacity style={styles.button} onPress={() => WebBrowser.openBrowserAsync(TARGET_URL)}>
+        <Text style={styles.buttonText}>Open again</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  webview: { flex: 1 },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, padding: 24 },
+  label: { fontSize: 16, color: '#555' },
+  button: { marginTop: 8, paddingHorizontal: 24, paddingVertical: 10, backgroundColor: '#6200ee', borderRadius: 8 },
+  buttonText: { color: '#fff', fontWeight: '600' },
 });
 """.trimIndent()
 
     fun inlineHtml(htmlContent: String): String {
-        val escaped = htmlContent
+        val escapedForJs = htmlContent
             .replace("\\", "\\\\")
             .replace("`", "\\`")
             .replace("\${", "\\\${")
         return """
-import React from 'react';
-import { View, StatusBar, StyleSheet } from 'react-native';
-import { WebView } from 'react-native-webview';
+import React, { useEffect } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 
-const HTML_CONTENT = `$escaped`;
+const HTML_CONTENT = `$escapedForJs`;
+
+function openHtml() {
+  const encoded = encodeURIComponent(HTML_CONTENT);
+  WebBrowser.openBrowserAsync('data:text/html,' + encoded);
+}
 
 export default function App() {
+  useEffect(() => {
+    openHtml();
+  }, []);
+
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <WebView
-        source={{ html: HTML_CONTENT }}
-        style={styles.webview}
-        javaScriptEnabled
-        domStorageEnabled
-        originWhitelist={['*']}
-      />
+      <ActivityIndicator size="large" color="#6200ee" />
+      <Text style={styles.label}>Opening page...</Text>
+      <TouchableOpacity style={styles.button} onPress={openHtml}>
+        <Text style={styles.buttonText}>Open again</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  webview: { flex: 1 },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, padding: 24 },
+  label: { fontSize: 16, color: '#555' },
+  button: { marginTop: 8, paddingHorizontal: 24, paddingVertical: 10, backgroundColor: '#6200ee', borderRadius: 8 },
+  buttonText: { color: '#fff', fontWeight: '600' },
 });
 """.trimIndent()
     }
 
     fun multiWeb(config: MultiWebConfig): String {
         val sites = config.sites
-        val tabsJson = sites.mapIndexed { i, site ->
+        val sitesJson = sites.mapIndexed { i, site ->
             val name = site.name.replace("'", "\\'")
             val url = site.url.replace("'", "\\'")
-            "  { key: 'tab$i', label: '$name', url: '$url' }"
+            "  { key: 'site$i', label: '$name', url: '$url' }"
         }.joinToString(",\n")
 
         return """
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StatusBar, StyleSheet } from 'react-native';
-import { WebView } from 'react-native-webview';
+import React from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, StatusBar } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 
-const TABS = [
-$tabsJson
+const SITES = [
+$sitesJson
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState(0);
-
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      <View style={styles.tabBar}>
-        {TABS.map((tab, i) => (
+      <Text style={styles.heading}>Sites</Text>
+      <ScrollView contentContainerStyle={styles.list}>
+        {SITES.map((site) => (
           <TouchableOpacity
-            key={tab.key}
-            style={[styles.tab, activeTab === i && styles.activeTab]}
-            onPress={() => setActiveTab(i)}
+            key={site.key}
+            style={styles.row}
+            onPress={() => WebBrowser.openBrowserAsync(site.url)}
           >
-            <Text style={[styles.tabText, activeTab === i && styles.activeTabText]}>
-              {tab.label}
-            </Text>
+            <Text style={styles.label}>{site.label}</Text>
+            <Text style={styles.url} numberOfLines={1}>{site.url}</Text>
           </TouchableOpacity>
         ))}
-      </View>
-      <WebView
-        source={{ uri: TABS[activeTab].url }}
-        style={styles.webview}
-        javaScriptEnabled
-        domStorageEnabled
-      />
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  tabBar: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#e0e0e0' },
-  tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
-  activeTab: { borderBottomWidth: 2, borderBottomColor: '#6200ee' },
-  tabText: { fontSize: 13, color: '#666' },
-  activeTabText: { color: '#6200ee', fontWeight: '600' },
-  webview: { flex: 1 },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  heading: { fontSize: 20, fontWeight: '700', padding: 20, paddingTop: 56, backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#e0e0e0' },
+  list: { padding: 12, gap: 8 },
+  row: { backgroundColor: '#fff', borderRadius: 12, padding: 16, elevation: 1, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  label: { fontSize: 16, fontWeight: '600', color: '#111', marginBottom: 4 },
+  url: { fontSize: 13, color: '#6200ee' },
 });
 """.trimIndent()
     }
 
     fun serverApp(url: String, serverNote: String): String = """
-import React from 'react';
-import { View, StatusBar, StyleSheet, Text } from 'react-native';
-import { WebView } from 'react-native-webview';
+import React, { useEffect } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 
 // ${serverNote.replace("\n", "\n// ")}
 
+const SERVER_URL = '${url.replace("'", "\\'")}';
+
 export default function App() {
+  useEffect(() => {
+    WebBrowser.openBrowserAsync(SERVER_URL);
+  }, []);
+
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <WebView
-        source={{ uri: '${url.replace("'", "\\'")}' }}
-        style={styles.webview}
-        javaScriptEnabled
-        domStorageEnabled
-        startInLoadingState
-        renderError={() => (
-          <View style={styles.error}>
-            <Text>Could not connect. Make sure your server is running and accessible.</Text>
-          </View>
-        )}
-      />
+      <ActivityIndicator size="large" color="#6200ee" />
+      <Text style={styles.label}>Connecting to server...</Text>
+      <Text style={styles.note}>Make sure your server is running and externally accessible.</Text>
+      <TouchableOpacity style={styles.button} onPress={() => WebBrowser.openBrowserAsync(SERVER_URL)}>
+        <Text style={styles.buttonText}>Retry</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  webview: { flex: 1 },
-  error: { flex: 1, padding: 24, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, padding: 24 },
+  label: { fontSize: 16, color: '#555' },
+  note: { fontSize: 13, color: '#999', textAlign: 'center' },
+  button: { marginTop: 8, paddingHorizontal: 24, paddingVertical: 10, backgroundColor: '#6200ee', borderRadius: 8 },
+  buttonText: { color: '#fff', fontWeight: '600' },
 });
 """.trimIndent()
 
@@ -204,10 +209,10 @@ const styles = StyleSheet.create({
   },
   "dependencies": {
     "expo": "~$sdkVersion.0.0",
-    "expo-status-bar": "~1.11.1",
+    "expo-status-bar": "~1.12.1",
+    "expo-web-browser": "~13.0.1",
     "react": "18.2.0",
-    "react-native": "0.73.0",
-    "react-native-webview": "13.6.4"
+    "react-native": "0.73.6"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
@@ -237,38 +242,43 @@ module.exports = function(api) {
     fun readme(appName: String): String = """
 # $appName — Expo Project
 
-Generated by WebToApp. Run this project on iOS and Android with Expo Go.
+Generated by WebToApp. Run this project on **iOS and Android** using Expo Go — no Android SDK or Xcode required.
 
 ## Quick Start
 
-1. Install dependencies:
+1. Install [Node.js 18+](https://nodejs.org) on your computer.
+
+2. Install dependencies:
    ```
    npm install
    ```
 
-2. Start the development server:
+3. Start the development server:
    ```
    npx expo start
    ```
 
-3. Scan the QR code with the **Expo Go** app on your phone.
-   - iOS: Download Expo Go from the App Store
-   - Android: Download Expo Go from Google Play
+4. Scan the QR code with the **Expo Go** app on your phone.
+   - **iOS**: [Download Expo Go from the App Store](https://apps.apple.com/app/expo-go/id982107779)
+   - **Android**: [Download Expo Go from Google Play](https://play.google.com/store/apps/details?id=host.exp.exponent)
 
-## Build for Production
+The app will open in a browser overlay powered by `expo-web-browser`, which is bundled inside Expo Go — no native build step needed.
 
-Install the EAS CLI and build native binaries:
+## Build for Production (optional)
+
+To compile a standalone .apk or .ipa without needing Android Studio or Xcode, use EAS Build:
 
 ```
 npm install -g eas-cli
+eas login
 eas build --platform all
 ```
 
-This produces an .apk (Android) and .ipa (iOS) that can be submitted to app stores.
+EAS builds in the cloud and delivers ready-to-install binaries.
 
 ## Notes
 
-- Requires Node.js 18+ installed on your machine
-- Expo SDK 51 targets React Native 0.73
+- **HTML apps**: content is loaded via a `data:text/html` URI. Very large HTML pages (> ~2 MB) may be truncated by the OS browser — for those, consider hosting the HTML online and using a URL-based app instead.
+- Expo SDK 51 targets React Native 0.73.6.
 """.trimIndent()
 }
