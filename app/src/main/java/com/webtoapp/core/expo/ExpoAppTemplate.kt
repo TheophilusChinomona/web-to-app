@@ -161,6 +161,52 @@ const styles = StyleSheet.create({
 });
 """.trimIndent()
 
+    fun embeddedHtml(): String = """
+import React, { useEffect, useState } from 'react';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { Asset } from 'expo-asset';
+import * as FileSystem from 'expo-file-system';
+import * as WebBrowser from 'expo-web-browser';
+
+const webAsset = require('./assets/web.html');
+
+export default function App() {
+  const [status, setStatus] = useState('Loading...');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const asset = Asset.fromModule(webAsset);
+        await asset.downloadAsync();
+        const base64 = await FileSystem.readAsStringAsync(asset.localUri!, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        await WebBrowser.openBrowserAsync('data:text/html;base64,' + base64);
+        setStatus('');
+      } catch (e: any) {
+        setStatus('Failed to load: ' + (e?.message ?? e));
+      }
+    })();
+  }, []);
+
+  return (
+    <View style={styles.container}>
+      {status ? (
+        <>
+          <ActivityIndicator size="large" color="#6200ee" />
+          <Text style={styles.label}>{status}</Text>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
+  label: { fontSize: 14, color: '#555' },
+});
+""".trimIndent()
+
     fun appJson(
         appName: String,
         slug: String,
@@ -192,7 +238,8 @@ const styles = StyleSheet.create({
       "supportsTablet": true,
       "bundleIdentifier": "$bundleIdentifier"
     },
-    "sdkVersion": "$sdkVersion.0.0"
+    "sdkVersion": "$sdkVersion.0.0",
+    "assetBundlePatterns": ["assets/**/*"]
   }
 }
 """.trimIndent()
@@ -209,6 +256,8 @@ const styles = StyleSheet.create({
   },
   "dependencies": {
     "expo": "~$sdkVersion.0.0",
+    "expo-asset": "~10.0.10",
+    "expo-file-system": "~17.0.1",
     "expo-status-bar": "~1.12.1",
     "expo-web-browser": "~13.0.1",
     "react": "18.2.0",
@@ -279,6 +328,7 @@ EAS builds in the cloud and delivers ready-to-install binaries.
 ## Notes
 
 - **HTML apps**: content is loaded via a `data:text/html` URI. Very large HTML pages (> ~2 MB) may be truncated by the OS browser — for those, consider hosting the HTML online and using a URL-based app instead.
+- **Next.js / React / Vue static apps**: run `next build` (with `output: 'export'` in `next.config.js`), `vite build`, or your framework's static export command, then import the output folder (`out/`, `dist/`) into WebToApp as a Frontend app. The Expo export will inline all CSS, JS, and images into a single self-contained `assets/web.html` file and load it via a base64 data URI — no server required.
 - Expo SDK 51 targets React Native 0.73.6.
 """.trimIndent()
 }

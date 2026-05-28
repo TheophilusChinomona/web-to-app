@@ -3,6 +3,7 @@ package com.webtoapp.core.expo
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Base64
 import com.webtoapp.core.logging.AppLogger
 import com.webtoapp.data.model.AppType
 import com.webtoapp.data.model.WebApp
@@ -67,8 +68,8 @@ class ExpoProjectGenerator(private val context: Context) {
         // README.md
         File(dir, "README.md").writeText(ExpoAppTemplate.readme(webApp.name))
 
-        // App.tsx
-        File(dir, "App.tsx").writeText(buildAppTsx(webApp))
+        // App.tsx — possibly also writes assets/web.html for static sites
+        File(dir, "App.tsx").writeText(buildAppTsxAndAssets(webApp, dir))
 
         // Icon assets
         copyIconAssets(webApp.iconPath, dir)
@@ -134,6 +135,128 @@ class ExpoProjectGenerator(private val context: Context) {
         }
 
         return null
+    }
+
+    private fun buildAppTsxAndAssets(webApp: WebApp, projectDir: File): String {
+        if (webApp.appType == AppType.FRONTEND || webApp.appType == AppType.HTML) {
+            val htmlConfig = webApp.htmlConfig
+            val srcDir = htmlConfig?.projectDir?.let { File(it) }
+            val entryFileName = htmlConfig?.getValidEntryFile() ?: "index.html"
+
+            if (srcDir != null && srcDir.exists()) {
+                val inlined = inlineStaticSite(srcDir, entryFileName)
+                if (inlined != null) {
+                    File(projectDir, "assets").mkdirs()
+                    File(projectDir, "assets/web.html").writeText(inlined)
+                    return ExpoAppTemplate.embeddedHtml()
+                }
+            }
+
+            val htmlContent = readHtmlContent(webApp)
+            return if (htmlContent != null) {
+                ExpoAppTemplate.inlineHtml(htmlContent)
+            } else {
+                ExpoAppTemplate.webView(webApp.url.ifBlank { "about:blank" })
+            }
+        }
+        return buildAppTsx(webApp)
+    }
+
+    private fun inlineStaticSite(projectDir: File, entryFileName: String): String? {
+        val entryFile = File(projectDir, entryFileName)
+        if (!entryFile.exists()) return null
+
+        var html = entryFile.readText()
+
+        // Inline CSS: <link rel="stylesheet" href="..."> → <style>...</style>
+        val cssLinkRegex = Regex("""<link\b([^>]*)>""", RegexOption.IGNORE_CASE)
+        html = cssLinkRegex.replace(html) { matchResult ->
+            val tag = matchResult.value
+            val attrs = matchResult.groupValues[1]
+            if (!attrs.contains("stylesheet", ignoreCase = true)) return@replace tag
+            val href = extractAttrValue(attrs, "href") ?: return@replace tag
+            if (isExternalUrl(href)) return@replace tag
+            val cssFile = resolveLocalFile(projectDir, href) ?: return@replace tag
+            if (!cssFile.exists()) return@replace tag
+            val cssContent = inlineCssUrls(cssFile.readText(), cssFile.parentFile ?: projectDir)
+            "<style>\n$cssContent\n</style>"
+        }
+
+        // Inline JS: <script src="..."></script> → <script>...</script>
+        val scriptRegex = Regex("""<script\b([^>]*)>([\s\S]*?)</script>""", RegexOption.IGNORE_CASE)
+        html = scriptRegex.replace(html) { matchResult ->
+            val attrs = matchResult.groupValues[1]
+            val src = extractAttrValue(attrs, "src") ?: return@replace matchResult.value
+            if (isExternalUrl(src)) return@replace matchResult.value
+            val jsFile = resolveLocalFile(projectDir, src) ?: return@replace matchResult.value
+            if (!jsFile.exists()) return@replace matchResult.value
+            "<script>\n${jsFile.readText()}\n</script>"
+        }
+
+        // Inline images: <img src="..."> → <img src="data:image/...;base64,...">
+        val imgSrcRegex = Regex("""(<img\b[^>]*)\bsrc=(["'])([^"']*)\2""", RegexOption.IGNORE_CASE)
+        html = imgSrcRegex.replace(html) { matchResult ->
+            val prefix = matchResult.groupValues[1]
+            val quote = matchResult.groupValues[2]
+            val src = matchResult.groupValues[3]
+            if (isExternalUrl(src)) return@replace matchResult.value
+            val imgFile = resolveLocalFile(projectDir, src) ?: return@replace matchResult.value
+            if (!imgFile.exists()) return@replace matchResult.value
+            val mimeType = mimeTypeForFile(imgFile)
+            val base64 = Base64.encodeToString(imgFile.readBytes(), Base64.NO_WRAP)
+            "${prefix}src=${quote}data:$mimeType;base64,$base64${quote}"
+        }
+
+        return html
+    }
+
+    private fun inlineCssUrls(cssContent: String, cssDir: File): String {
+        val urlRegex = Regex("""url\(["']?([^"')]+)["']?\)""", RegexOption.IGNORE_CASE)
+        return urlRegex.replace(cssContent) { matchResult ->
+            val url = matchResult.groupValues[1]
+            if (isExternalUrl(url)) return@replace matchResult.value
+            val assetFile = resolveLocalFile(cssDir, url) ?: return@replace matchResult.value
+            if (!assetFile.exists()) return@replace matchResult.value
+            val mimeType = mimeTypeForFile(assetFile)
+            val base64 = Base64.encodeToString(assetFile.readBytes(), Base64.NO_WRAP)
+            "url('data:$mimeType;base64,$base64')"
+        }
+    }
+
+    private fun resolveLocalFile(baseDir: File, path: String): File? {
+        if (path.isBlank()) return null
+        val cleaned = path.split("?").first().split("#").first()
+        return try {
+            File(baseDir, cleaned).canonicalFile.takeIf {
+                it.absolutePath.startsWith(baseDir.canonicalPath)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun extractAttrValue(attrs: String, attrName: String): String? {
+        val regex = Regex("""\b$attrName=["']([^"']*)["']""", RegexOption.IGNORE_CASE)
+        return regex.find(attrs)?.groupValues?.get(1)
+    }
+
+    private fun isExternalUrl(url: String): Boolean {
+        return url.startsWith("http://") || url.startsWith("https://") ||
+               url.startsWith("//") || url.startsWith("data:") || url.startsWith("#")
+    }
+
+    private fun mimeTypeForFile(file: File): String = when (file.extension.lowercase()) {
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "gif" -> "image/gif"
+        "svg" -> "image/svg+xml"
+        "webp" -> "image/webp"
+        "ico" -> "image/x-icon"
+        "woff" -> "font/woff"
+        "woff2" -> "font/woff2"
+        "ttf" -> "font/ttf"
+        "eot" -> "application/vnd.ms-fontobject"
+        else -> "application/octet-stream"
     }
 
     private fun copyIconAssets(iconPath: String?, dir: File) {
