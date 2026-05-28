@@ -360,4 +360,11 @@ class Converters {
     @TypeConverter
     fun toCloudAppConfig(value: String): com.webtoapp.data.model.CloudAppConfig? = fromJson(value)
 
+    // ExpoExportConfig 转换
+    @TypeConverter
+    fun fromExpoExportConfig(value: com.webtoapp.core.expo.ExpoExportConfig?): String = toJson(value)
+
+    @TypeConverter
+    fun toExpoExportConfig(value: String): com.webtoapp.core.expo.ExpoExportConfig? = fromJson(value)
+
 }

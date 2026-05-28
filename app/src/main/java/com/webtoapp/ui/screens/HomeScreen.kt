@@ -122,6 +122,7 @@ fun HomeScreen(
     onOpenAiHtmlCoding: () -> Unit = {},
     onOpenExtensionModules: () -> Unit = {},
     onOpenLinuxEnvironment: () -> Unit = {},
+    onExpoExport: (WebApp) -> Unit = {},
 ) {
     // Initialize多语言
     InitializeLanguage()
@@ -684,6 +685,7 @@ fun HomeScreen(
                                     }
                                 }
                             },
+                            onExpoExport = { onExpoExport(app) },
                             onMoveToCategory = {
                                 appToMove = app
                                 showMoveToCategoryDialog = true
@@ -1082,6 +1084,7 @@ fun AppCard(
     onExport: () -> Unit = {},
     onBuildApk: () -> Unit = {},
     onShareApk: () -> Unit = {},
+    onExpoExport: () -> Unit = {},
     onMoveToCategory: () -> Unit = {},
     healthStatus: com.webtoapp.core.stats.HealthStatus? = null,
     previewImageLoader: ImageLoader,
@@ -1394,6 +1397,14 @@ fun AppCard(
                             onShareApk()
                         },
                         leadingIcon = { Icon(Icons.Outlined.Share, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(Strings.expoMenuItem) },
+                        onClick = {
+                            expanded = false
+                            onExpoExport()
+                        },
+                        leadingIcon = { Icon(Icons.Outlined.PhoneAndroid, null) }
                     )
                     DropdownMenuItem(
                         text = { Text(Strings.btnExport) },

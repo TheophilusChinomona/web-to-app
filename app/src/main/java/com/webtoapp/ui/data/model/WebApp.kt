@@ -109,6 +109,9 @@ data class WebApp(
     
     // APK 导出配置（仅打包APK时生效）
     val apkExportConfig: ApkExportConfig? = null,
+
+    // Expo 导出配置（用于生成跨平台 Expo/React Native 项目）
+    val expoExportConfig: com.webtoapp.core.expo.ExpoExportConfig? = null,
     
     // Theme配置（用于导出的应用 UI 风格）
     val themeType: String = "AURORA",

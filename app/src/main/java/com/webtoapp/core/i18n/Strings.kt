@@ -31019,6 +31019,73 @@ object Strings {
         AppLanguage.ARABIC -> "تطبيق التكوين المخصص"
     }
 
+    // ==================== Expo 导出 ====================
+    val expoExportTitle: String get() = when (lang) {
+        AppLanguage.CHINESE -> "导出 Expo 项目"
+        AppLanguage.ENGLISH -> "Export for Expo Go"
+        AppLanguage.ARABIC -> "تصدير لـ Expo Go"
+    }
+
+    val expoExportDescription: String get() = when (lang) {
+        AppLanguage.CHINESE -> "生成可在 iOS 和 Android 上运行的 Expo/React Native 项目"
+        AppLanguage.ENGLISH -> "Generate an Expo/React Native project that runs on both iOS and Android"
+        AppLanguage.ARABIC -> "إنشاء مشروع Expo/React Native يعمل على iOS وAndroid"
+    }
+
+    val expoBundleId: String get() = when (lang) {
+        AppLanguage.CHINESE -> "iOS Bundle ID"
+        AppLanguage.ENGLISH -> "iOS Bundle Identifier"
+        AppLanguage.ARABIC -> "معرف الحزمة iOS"
+    }
+
+    val expoGenerating: String get() = when (lang) {
+        AppLanguage.CHINESE -> "正在生成 Expo 项目..."
+        AppLanguage.ENGLISH -> "Generating Expo project..."
+        AppLanguage.ARABIC -> "جاري إنشاء مشروع Expo..."
+    }
+
+    val expoGenerateSuccess: String get() = when (lang) {
+        AppLanguage.CHINESE -> "Expo 项目已生成"
+        AppLanguage.ENGLISH -> "Expo project generated"
+        AppLanguage.ARABIC -> "تم إنشاء مشروع Expo"
+    }
+
+    val expoGenerateFailed: String get() = when (lang) {
+        AppLanguage.CHINESE -> "生成失败: %s"
+        AppLanguage.ENGLISH -> "Generation failed: %s"
+        AppLanguage.ARABIC -> "فشل الإنشاء: %s"
+    }
+
+    val expoShareZip: String get() = when (lang) {
+        AppLanguage.CHINESE -> "分享 ZIP"
+        AppLanguage.ENGLISH -> "Share ZIP"
+        AppLanguage.ARABIC -> "مشاركة ZIP"
+    }
+
+    val expoTargetPlatforms: String get() = when (lang) {
+        AppLanguage.CHINESE -> "目标平台"
+        AppLanguage.ENGLISH -> "Target Platforms"
+        AppLanguage.ARABIC -> "المنصات المستهدفة"
+    }
+
+    val expoHowToRun: String get() = when (lang) {
+        AppLanguage.CHINESE -> "如何运行"
+        AppLanguage.ENGLISH -> "How to run"
+        AppLanguage.ARABIC -> "كيفية التشغيل"
+    }
+
+    val expoInstructions: String get() = when (lang) {
+        AppLanguage.CHINESE -> "解压 ZIP，运行 npm install && npx expo start，使用 Expo Go 扫描二维码"
+        AppLanguage.ENGLISH -> "Unzip the file, run npm install && npx expo start, then scan the QR code with Expo Go"
+        AppLanguage.ARABIC -> "فك ضغط الملف، شغّل npm install && npx expo start، ثم امسح رمز QR باستخدام Expo Go"
+    }
+
+    val expoMenuItem: String get() = when (lang) {
+        AppLanguage.CHINESE -> "导出 Expo 项目"
+        AppLanguage.ENGLISH -> "Export for Expo Go"
+        AppLanguage.ARABIC -> "تصدير لـ Expo Go"
+    }
+
 }
 
 

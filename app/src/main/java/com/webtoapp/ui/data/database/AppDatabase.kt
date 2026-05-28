@@ -22,7 +22,7 @@ import com.webtoapp.core.stats.AppUsageStatsDao
  */
 @Database(
     entities = [WebApp::class, AppCategory::class, AppUsageStats::class, AppHealthRecord::class],
-    version = 33,
+    version = 34,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -457,6 +457,9 @@ abstract class AppDatabase : RoomDatabase() {
         
         // 迁移定义 - deviceDisguiseConfig (版本 32 -> 33)
         private val MIGRATION_32_33 = createAddColumnMigration(32, 33, "deviceDisguiseConfig")
+
+        // 迁移定义 - expoExportConfig (版本 33 -> 34)
+        private val MIGRATION_33_34 = createAddColumnMigration(33, 34, "expoExportConfig")
         
         // 迁移定义 - 删除 docsSiteConfig (版本 27 -> 28)
         // 使用 rebuildWebAppsTable 辅助方法简化表重建
@@ -600,7 +603,8 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_29_30,
                     MIGRATION_30_31,
                     MIGRATION_31_32,
-                    MIGRATION_32_33
+                    MIGRATION_32_33,
+                    MIGRATION_33_34
                 )
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .fallbackToDestructiveMigrationFrom(1, 2, 3, 4, 5, 6, 7)

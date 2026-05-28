@@ -100,6 +100,8 @@ object Routes {
     const val FAVORITES = "favorites"
     const val NOTIFICATIONS = "notifications"
 
+    const val EXPO_EXPORT = "expo_export/{appId}"
+
     val TAB_ROUTES = setOf(HOME, APP_STORE, COMMUNITY, PROFILE_TAB, MORE)
 
     fun editApp(appId: Long) = "edit_app/$appId"
@@ -118,6 +120,7 @@ object Routes {
     fun moduleDetail(moduleId: Int) = "module_detail/$moduleId"
     fun communityUser(userId: Int) = "community_user/$userId"
     fun communityPost(postId: Int) = "community_post/$postId"
+    fun expoExport(appId: Long) = "expo_export/$appId"
 }
 
 internal fun isDetailRoute(route: String?): Boolean =

@@ -68,5 +68,9 @@ internal fun AppNavigationGraph(
         addCommunityRoutes(
             navController = navController,
         )
+        addExpoRoutes(
+            navController = navController,
+            dependencies = dependencies,
+        )
     }
 }
